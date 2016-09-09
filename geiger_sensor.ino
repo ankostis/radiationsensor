@@ -30,11 +30,8 @@ LiquidCrystal lcd(3,4,5,6,7,8);
 
 
 // Threshold values for the led bar
-#define TH1 45
-#define TH2 95
-#define TH3 200
-#define TH4 400
-#define TH5 600
+#define NLEDS 5
+int LED_THRESH[] = {40, 100, 250, 600, 1500};
 
 // Conversion factor - CPM to uSV/h
 #define CONV_FACTOR 0.00812
@@ -42,13 +39,41 @@ LiquidCrystal lcd(3,4,5,6,7,8);
 // Variables
 int ledArray [] = {10,11,12,13,9};
 int geiger_input = 2;
-long count = 0;
-long countPerMinute = 0;
-long timePrevious = 0;
-long timePreviousMeassure = 0;
-long time = 0;
-long countPrevious = 0;
-float radiationValue = 0.0;
+long previous10secMillis = 0;
+volatile int count = 0;
+
+#define CLICK_CYCLE 7
+long lastClickMillis[CLICK_CYCLE] = {0};
+byte nextClickIx = 0;
+volatile float maxCPM = 0.0;
+
+void update_stats() {
+    Serial.print(count,DEC);
+    Serial.print(',');
+    Serial.println(maxCPM, 4);
+
+    lcd.clear();    
+
+    lcd.setCursor(0,0);
+    lcd.print("C10SEC=");
+    lcd.setCursor(7,0);
+    lcd.print(count);
+
+    lcd.setCursor(0, 1);
+    lcd.print("MaxCPM=");
+    lcd.setCursor(7,1);
+    lcd.print(maxCPM, 4);
+}
+
+void update_leds(float CPM) {
+  //led var setting
+  int i = 0;
+  for(int i=0; i < NLEDS; i++) {
+    int state = (CPM > LED_THRESH[i])? HIGH: LOW;
+    digitalWrite(ledArray[i], state);
+  }
+}
+
 
 void setup(){
   pinMode(geiger_input, INPUT);
@@ -64,99 +89,54 @@ void setup(){
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Radiation Sensor");
-  lcd.setCursor(0,1);
-  lcd.print("Board - Arduino");  
-  delay(1000);
-
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(" Cooking Hacks");
-  delay(1000);
-
-  lcd.clear();
-  lcd.setCursor(0,1);  
-  lcd.print("www.cooking-hacks.com");
-  delay(500);
-  for (int i=0;i<5;i++){
-    delay(200);  
+  delay(700);
+  for (int i=0;i<10;i++){
+    delay(100);  
     lcd.scrollDisplayLeft();
   }
-  delay(500);
 
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("  - Libelium -");
+  lcd.print( __DATE__);  
   lcd.setCursor(0,1);
-  lcd.print("www.libelium.com");    
-  delay(1000);
+  lcd.print(__TIME__);
+  delay(1700);
 
-  lcd.clear();  
-  lcd.setCursor(0, 0);
-  lcd.print("CPM=");
-  lcd.setCursor(4,0);
-  lcd.print(6*count);
-  lcd.setCursor(0,1);
-  lcd.print(radiationValue);
+  Serial.println("CLICKS, MaxCPM");
+  update_stats();
 
   attachInterrupt(0,countPulse,FALLING);
-
 }
 
 void loop(){
-  if (millis()-timePreviousMeassure > 10000){
-    countPerMinute = 6*count;
-    radiationValue = countPerMinute * CONV_FACTOR;
-    timePreviousMeassure = millis();
-    Serial.print("cpm = "); 
-    Serial.print(countPerMinute,DEC);
-    Serial.print(" - ");
-    Serial.print("uSv/h = ");
-    Serial.println(radiationValue,4);      
-    lcd.clear();    
-    lcd.setCursor(0, 0);
-    lcd.print("CPM=");
-    lcd.setCursor(4,0);
-    lcd.print(countPerMinute);
-    lcd.setCursor(0,1);
-    lcd.print(radiationValue,4);
-    lcd.setCursor(6,1);
-    lcd.print(" uSv/h");
+  if (millis() - previous10secMillis > 10000) {
+    previous10secMillis = millis();
+    update_stats();
 
-    //led var setting  
-    if(countPerMinute <= TH1) ledVar(0);
-    if((countPerMinute <= TH2)&&(countPerMinute>TH1)) ledVar(1);
-    if((countPerMinute <= TH3)&&(countPerMinute>TH2)) ledVar(2);
-    if((countPerMinute <= TH4)&&(countPerMinute>TH3)) ledVar(3);
-    if((countPerMinute <= TH5)&&(countPerMinute>TH4)) ledVar(4);
-    if(countPerMinute>TH5) ledVar(5);
-
-    count = 0;
-
+    count = maxCPM = 0;
   }
 
 }
 
 void countPulse(){
   detachInterrupt(0);
+  long now = millis();
+  
   count++;
-  while(digitalRead(2)==0){
+  
+  lastClickMillis[nextClickIx] = now;
+  nextClickIx++;
+  if (nextClickIx == CLICK_CYCLE) {
+    nextClickIx = 0;
   }
+  
+  float CPM = CLICK_CYCLE * 100000.0 / (now - lastClickMillis[nextClickIx]);
+  update_leds(CPM);
+  
+  if (maxCPM < CPM)
+    maxCPM = CPM;
+  
+  while(digitalRead(2)==0);
   attachInterrupt(0,countPulse,FALLING);
 }
 
-void ledVar(int value){
-  if (value > 0){
-    for(int i=0;i<=value;i++){
-      digitalWrite(ledArray[i],HIGH);
-    }
-    for(int i=5;i>value;i--){
-      digitalWrite(ledArray[i],LOW);
-    }
-  }
-  else {
-    for(int i=5;i>=0;i--){
-      digitalWrite(ledArray[i],LOW);
-    }
-  }
-}
-    
