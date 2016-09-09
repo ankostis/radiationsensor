@@ -28,6 +28,9 @@
 // initialize the library with the numbers of the interface pins
 LiquidCrystal lcd(3,4,5,6,7,8);
 
+// Trick from http://stackoverflow.com/questions/5459868/c-preprocessor-concatenate-int-to-string
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
 
 // Threshold values for the led bar
 #define NLEDS 5
@@ -42,8 +45,8 @@ int geiger_input = 2;
 long previous10secMillis = 0;
 volatile int count = 0;
 
-#define CLICK_CYCLE 7
-long lastClickMillis[CLICK_CYCLE] = {0};
+#define NMAX_CPM 7
+long lastClickMillis[NMAX_CPM] = {0};
 byte nextClickIx = 0;
 volatile float maxCPM = 0.0;
 
@@ -60,8 +63,8 @@ void update_stats() {
     lcd.print(count);
 
     lcd.setCursor(0, 1);
-    lcd.print("MaxCPM=");
-    lcd.setCursor(7,1);
+    lcd.print("MaxCPM" STR(NMAX_CPM) "=");
+    lcd.setCursor(8,1);
     lcd.print(maxCPM, 4);
 }
 
@@ -102,7 +105,7 @@ void setup(){
   lcd.print(__TIME__);
   delay(1700);
 
-  Serial.println("CLICKS, MaxCPM");
+  Serial.println("CLICKS, MaxCPM" STR(NMAX_CPM));
   update_stats();
 
   attachInterrupt(0,countPulse,FALLING);
@@ -126,11 +129,11 @@ void countPulse(){
   
   lastClickMillis[nextClickIx] = now;
   nextClickIx++;
-  if (nextClickIx == CLICK_CYCLE) {
+  if (nextClickIx == NMAX_CPM) {
     nextClickIx = 0;
   }
   
-  float CPM = CLICK_CYCLE * 100000.0 / (now - lastClickMillis[nextClickIx]);
+  float CPM = NMAX_CPM * 100000.0 / (now - lastClickMillis[nextClickIx]);
   update_leds(CPM);
   
   if (maxCPM < CPM)
