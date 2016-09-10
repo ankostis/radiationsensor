@@ -22,7 +22,7 @@
  *  Implementation:    Marcos Yarza
  */
 
-// include the library code:
+#include <Streaming.h>
 #include <LiquidCrystal.h>
 
 // initialize the library with the numbers of the interface pins
@@ -52,22 +52,16 @@ volatile float maxCPM = 0.0;
 
 void update_stats(int send_serial) {
     if (send_serial) {
-      Serial.print(count,DEC);
-      Serial.print(',');
-      Serial.println(maxCPM, 4);
+      Serial << count << ',' << _FLOAT(maxCPM, 4) << endl;
     }
     
     lcd.clear();    
 
-    lcd.setCursor(0,0);
-    lcd.print("C10SEC=");
-    lcd.setCursor(7,0);
-    lcd.print(count);
+    //lcd.setCursor(0,0);
+    lcd << "C10SEC=" << count;
 
     lcd.setCursor(0, 1);
-    lcd.print("MaxCPM" STR(NMAX_CPM) "=");
-    lcd.setCursor(8,1);
-    lcd.print(maxCPM, 4);
+    lcd << "MaxCPM" STR(NMAX_CPM) "=" << _FLOAT(maxCPM, 4);
 }
 
 void update_leds(float CPM) {
@@ -89,11 +83,12 @@ void setup(){
 
   Serial.begin(19200);
 
+
   //set up the LCD\'s number of columns and rows:
   lcd.begin(16, 2);
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Radiation Sensor");
+  //lcd.setCursor(0, 0);
+  lcd << F("Radiation Sensor");
   delay(700);
   for (int i=0;i<10;i++){
     delay(100);  
@@ -101,13 +96,14 @@ void setup(){
   }
 
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print( __DATE__);  
+  //lcd.setCursor(0, 0);
+  lcd <<  __DATE__ ;  
   lcd.setCursor(0,1);
-  lcd.print(__TIME__);
+  lcd << __TIME__;
   delay(1700);
 
-  Serial.println("CLICKS, MaxCPM" STR(NMAX_CPM));
+  Serial << F("PROG: " __DATE__ ", " __TIME__) << endl;
+  Serial << F("CLICKS, MaxCPM" STR(NMAX_CPM)) << endl;
   update_stats(0);
 
   attachInterrupt(0,countPulse,FALLING);
