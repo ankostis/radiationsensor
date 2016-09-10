@@ -34,7 +34,7 @@ LiquidCrystal lcd(3,4,5,6,7,8);
 
 // Threshold values for the led bar
 #define NLEDS 5
-int LED_THRESH[] = {40, 100, 250, 600, 1500};
+int LED_THRESH[] = {30, 70, 150, 350, 800};
 
 // Conversion factor - CPM to uSV/h
 #define CONV_FACTOR 0.00812
