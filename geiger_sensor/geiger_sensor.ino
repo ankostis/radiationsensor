@@ -45,16 +45,18 @@ int geiger_input = 2;
 long previous10secMillis = 0;
 volatile int count = 0;
 
-#define NMAX_CPM 7
+#define NMAX_CPM 5
 long lastClickMillis[NMAX_CPM] = {0};
-byte nextClickIx = 0;
+int nextClickIx = 0;
 volatile float maxCPM = 0.0;
 
-void update_stats() {
-    Serial.print(count,DEC);
-    Serial.print(',');
-    Serial.println(maxCPM, 4);
-
+void update_stats(int send_serial) {
+    if (send_serial) {
+      Serial.print(count,DEC);
+      Serial.print(',');
+      Serial.println(maxCPM, 4);
+    }
+    
     lcd.clear();    
 
     lcd.setCursor(0,0);
@@ -106,7 +108,7 @@ void setup(){
   delay(1700);
 
   Serial.println("CLICKS, MaxCPM" STR(NMAX_CPM));
-  update_stats();
+  update_stats(0);
 
   attachInterrupt(0,countPulse,FALLING);
 }
@@ -114,7 +116,7 @@ void setup(){
 void loop(){
   if (millis() - previous10secMillis > 10000) {
     previous10secMillis = millis();
-    update_stats();
+    update_stats(1);
 
     count = maxCPM = 0;
   }
@@ -133,7 +135,7 @@ void countPulse(){
     nextClickIx = 0;
   }
   
-  float CPM = NMAX_CPM * 100000.0 / (now - lastClickMillis[nextClickIx]);
+  float CPM = NMAX_CPM * 60000.0 / (now - lastClickMillis[nextClickIx]);
   update_leds(CPM);
   
   if (maxCPM < CPM)

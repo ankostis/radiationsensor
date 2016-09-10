@@ -1,5 +1,4 @@
 cpm=18, clicks=3
-cpm=0, clicks=0
 cpm=18, clicks=3
 cpm=18, clicks=3
 cpm=24, clicks=4
