@@ -32,11 +32,12 @@
 #define DEBUG
 
 #ifdef DEBUG
+  #define LOG_ACTIONS       // Serial-log commands send over serial (good).
   #define LOG_BOOT_CONFIG   // Serial-log config vars on reset.
   //#define LOG_NEXT_REC    // Serial-log each rec traversed (much stuff).
   //#define LOG_NEW_REC     // Serial-log values of each new rec.
-  #define LOG_LONG_LOOP   // Serial-log entrance to long-loop.
-  #define REC_DISABLED    // Do not actually write EEPROM.
+  #define LOG_LONG_LOOP     // Serial-log entrance to long-loop.
+  #define REC_DISABLED      // Do not actually write EEPROM.
 #endif
 
 const ulong  SHORT_LOOP_MSEC   = 10 * 1000;
@@ -67,12 +68,12 @@ ulong longLoopMillis            = 0;
 bool is_recording               = false;
 
 volatile uint clicks            = 0;
-volatile float maxCPM           = 0.0;
+volatile int maxCPM           = 0.0;
 
 /** 
  * The `maxCPM uinte-buffer.
  */
-ulong lastClickMillis[NMAX_CPM] = {0};
+ulong clickTimesBuffer[NMAX_CPM] = {0};
 int nextClickIx = 0;
 //
 //////////////////////////////////
@@ -185,8 +186,8 @@ void STORAGE_append_rec() {
     Serial << F("Store rec: ") << eix << endl;
 
     Rec rec;
-    rec.clicks = int(clicks);
-    rec.maxCPM = int(maxCPM);
+    rec.clicks = clicks;
+    rec.maxCPM = maxCPM;
     _seal_rec(rec);
     
     #ifdef LOG_NEW_REC
@@ -282,7 +283,7 @@ void setup(){
 
 void update_stats(int send_serial) {
     if (send_serial) {
-      Serial << clicks << ',' << _FLOAT(maxCPM, 4) << endl;
+      Serial << clicks << ',' << maxCPM << endl;
     }
     
     lcd.clear();    
@@ -291,7 +292,7 @@ void update_stats(int send_serial) {
     lcd.setCursor(11, 0);
     lcd << "Rec=" << is_recording;
     lcd.setCursor(0, 1);
-    lcd << "MaxCPM" STR(NMAX_CPM) "=" << _FLOAT(maxCPM, 4);
+    lcd << "MaxCPM" STR(NMAX_CPM) "=" << maxCPM;
 }
 
 
@@ -305,32 +306,33 @@ void send_config() {
   Serial << F("]\n");
 }
 
-void send_state() {
-  Serial << F("shortLoopMillis=") << shortLoopMillis << F(",");
-  Serial << F("longLoopMillis=") << longLoopMillis << F(",");
+void send_state(ulong now) {
+  Serial << F("shortLoopETA=") << (SHORT_LOOP_MSEC - now + shortLoopMillis) << F(",");
+  Serial << F("longLoopETA=") << (LONG_LOOP_MSEC - now + longLoopMillis) << F(",");
   Serial << F("is_recording=") << is_recording << F(",");
   Serial << F("clicks=") << clicks << F(",");
-  Serial << F("maxCPM=[") << maxCPM << F(",");
+  Serial << F("maxCPM=") << maxCPM << F(",");
+  Serial << F("clickTimesBuffer=[");
   for (int i = 0; i < NMAX_CPM; i++)
-    Serial << lastClickMillis[i] << F(",");
+    Serial << clickTimesBuffer[i] << F(",");
   Serial << F("]\n");
 }
 
 
 
-void read_keys() {
+void read_keys(ulong now) {
   char inp = Serial.read();
   if (inp == 'R') {
     is_recording ^= true;       
-    #ifdef DEBUG
+    #ifdef LOG_ACTIONS
       Serial << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
     #endif
     lcd.clear();
-    lcd << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
+    lcd << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED."));
   
   
   } else if (inp == 'C') {
-    #ifdef DEBUG
+    #ifdef LOG_ACTIONS
       Serial << F("Clearing Storage!") << endl;
     #endif
     STORAGE_clear();
@@ -340,28 +342,36 @@ void read_keys() {
   
   } else if ( (inp | 1<<5) == 's') {
     send_config();
-    send_state();
+    send_state(now);
     
   } else if ( (inp | 1<<5) == 'p') {
     // prints storage to serial.
     
-    Serial << F("time,clicks,maxCPM") << endl;
+    Serial << F("Recorded data::\ntime,clicks,maxCPM") << endl;
     STORAGE_traverse(0, send_rec);
+    
   } else if ( (inp | 1<<5) == 'h') {
-    #ifdef DEBUG
-      Serial << F("R - > Record on/off!\nC -> Clear store(!)\ns -> log Status\n<p> -> Play recording\n");
-    #endif
+    Serial << F("R - > Record on/off!\nC -> Clear store(!)\ns -> log Status\n<p> -> Play recording\n");
     STORAGE_clear();
     lcd.clear();
     lcd << F("R:rec1/0 C:clear");
     lcd.setCursor(0, 1);
     lcd << F("p:play s:status");
+
+  } else if (inp > 0) {
+    #ifdef LOG_ACTIONS
+      Serial << F("Invalid key! try <h> for help\n");
+    #endif
+    lcd.clear();
+    lcd << F("Try h: Help");
   }
 }
 
 
 void loop(){
   ulong now = millis();
+
+  read_keys(now);
 
   // SHORT loop
   //
@@ -383,14 +393,11 @@ void loop(){
       STORAGE_append_rec();
     }
   } // long loop
-
-
-  read_keys();
 }
 
 
 
-void update_leds(float CPM) {
+void update_leds(int CPM) {
   //led var setting
   int i = 0;
   for(int i=0; i < NLEDS; i++) {
@@ -409,13 +416,13 @@ void INT_countPulseclicks(){
   
   clicks++;
   
-  lastClickMillis[nextClickIx] = now;
+  clickTimesBuffer[nextClickIx] = now;
   nextClickIx++;
   if (nextClickIx == NMAX_CPM) {
     nextClickIx = 0;
   }
   
-  float CPM = NMAX_CPM * 60000.0 / (now - lastClickMillis[nextClickIx]);
+  int CPM = int(NMAX_CPM * 60000.0 / (now - clickTimesBuffer[nextClickIx]));
   update_leds(CPM);
   
   if (maxCPM < CPM)
