@@ -32,6 +32,7 @@
 #ifdef DEBUG
   #define D_NEXT_REC
   #define D_NEW_REC
+  #define D_LONG_LOOP
 #endif
 
 const long SHORT_LOOP_MSEC  = 10 * 1000;
@@ -127,9 +128,10 @@ RTC_DS1307 rtc;
 
 /**
  * Traverse all storage-recs untill invalid CRC met.
- * * :param printout: a function to handle each rec
+ * 
+ * :param recHandler_func: a function to handle each valid rec
  */
-int STORAGE_traverse(void (*printout)(Rec) = NULL) {
+int STORAGE_traverse(void (*recHandler_func)(Rec) = NULL) {
   int indx = 0;
   Rec rec;
   for(; indx < EEPROM.length(); indx += sizeof(Rec)) {
@@ -140,8 +142,8 @@ int STORAGE_traverse(void (*printout)(Rec) = NULL) {
     #endif
     if (rec.crc != crc) 
       break;
-    if (printout) {
-      printout(rec);
+    if (recHandler_func) {
+      recHandler_func(rec);
     }
   }
   indx &= EEPROM.length() - 1;
@@ -208,27 +210,6 @@ void send_rtc() {
 }
 
 
-void update_stats(int send_serial) {
-    if (send_serial) {
-      Serial << clicks << ',' << _FLOAT(maxCPM, 4) << endl;
-    }
-    
-    lcd.clear();    
-
-    lcd << "C10SEC=" << clicks;
-    lcd.setCursor(0, 1);
-    lcd << "MaxCPM" STR(NMAX_CPM) "=" << _FLOAT(maxCPM, 4);
-}
-
-void update_leds(float CPM) {
-  //led var setting
-  int i = 0;
-  for(int i=0; i < NLEDS; i++) {
-    int state = (CPM > LED_THRESH[i])? HIGH: LOW;
-    digitalWrite(LED_ARRAY[i], state);
-  }
-}
-
 void setup(){
   pinMode(GEIGER_PIN, INPUT);
   digitalWrite(GEIGER_PIN,HIGH);
@@ -267,67 +248,105 @@ void setup(){
 }
 
 
-void loop(){
-  long now = millis();
-  
-  if (now - shortLoopMillis > SHORT_LOOP_MSEC) {
-    shortLoopMillis = now;
-    update_stats(1);
 
-    clicks = maxCPM = 0;
-
-    char inp = Serial.read();
-    if (inp == 'R') {
-      is_recording ^= true;       
-      #ifdef DEBUG
-        Serial << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
-      #endif
-      lcd.clear();
-      lcd << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
-    
-    
-    } else if (inp == 'C') {
-      #ifdef DEBUG
-        Serial << F("Clearing Storage!") << endl;
-      #endif
-      STORAGE_clear();
-      lcd.clear();
-      lcd << F("Storage cleared!");
-      
-    
-    } else if ( (inp | 1<<5) == 'h') {
-      #ifdef DEBUG
-        Serial << F("R - > Record on/off!\nC -> Clear store\n<any> -> Print store\n");
-      #endif
-      STORAGE_clear();
-      lcd.clear();
-      lcd << F("R:rec1/0 C:clear");
-      lcd.setCursor(0, 1);
-      lcd << F("<any>:print store");
-
-    
-    } else if (inp > 0) {
-      // Send storage to serial.
-      
-      Serial << F("time,clicks,maxCPM") << endl;
-      STORAGE_traverse(send_rec);
+void update_stats(int send_serial) {
+    if (send_serial) {
+      Serial << clicks << ',' << _FLOAT(maxCPM, 4) << endl;
     }
-  } // short loop
+    
+    lcd.clear();    
 
-
-
-  if (now - longLoopMillis > LONG_LOOP_MSEC) {
-    longLoopMillis = now;
-
-    if (is_recording) {
-      STORAGE_append_rec();
-    }
-
-  } // long loop
-
+    lcd << "C10Sec=" << clicks;
+    lcd.setCursor(11, 0);
+    lcd << "Rec=" << is_recording;
+    lcd.setCursor(0, 1);
+    lcd << "MaxCPM" STR(NMAX_CPM) "=" << _FLOAT(maxCPM, 4);
 }
 
 
+void read_keys() {
+  char inp = Serial.read();
+  if (inp == 'R') {
+    is_recording ^= true;       
+    #ifdef DEBUG
+      Serial << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
+    #endif
+    lcd.clear();
+    lcd << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
+  
+  
+  } else if (inp == 'C') {
+    #ifdef DEBUG
+      Serial << F("Clearing Storage!") << endl;
+    #endif
+    STORAGE_clear();
+    lcd.clear();
+    lcd << F("Storage cleared!");
+    
+  
+  } else if ( (inp | 1<<5) == 'h') {
+    #ifdef DEBUG
+      Serial << F("R - > Record on/off!\nC -> Clear store\n<any> -> Print store(!)\n");
+    #endif
+    STORAGE_clear();
+    lcd.clear();
+    lcd << F("R:rec1/0 C:clear");
+    lcd.setCursor(0, 1);
+    lcd << F("<any>:print store");
+
+  
+  } else if (inp > 0) {
+    // Any key prints storage to serial.
+    
+    Serial << F("time,clicks,maxCPM") << endl;
+    STORAGE_traverse(send_rec);
+  }
+}
+
+
+void loop(){
+  long now = millis();
+
+  // SHORT loop
+  //
+  if (now - shortLoopMillis > SHORT_LOOP_MSEC) {
+    shortLoopMillis = now;
+    update_stats(1);
+    clicks = maxCPM = 0;
+  } // short loop
+
+
+  // LONG loop
+  //
+  if (now - longLoopMillis > LONG_LOOP_MSEC) {
+    longLoopMillis = now;
+    #ifdef D_LONG_LOOP
+       Serial << F("Long loop: REC=") << is_recording << endl; 
+    #endif
+    if (is_recording) {
+      STORAGE_append_rec();
+    }
+  } // long loop
+
+
+  read_keys();
+}
+
+
+
+void update_leds(float CPM) {
+  //led var setting
+  int i = 0;
+  for(int i=0; i < NLEDS; i++) {
+    const int state = (CPM > LED_THRESH[i])? HIGH: LOW;
+    digitalWrite(LED_ARRAY[i], state);
+  }
+}
+
+
+/**
+ * Interupt geiger routine.
+ */
 void INT_countPulseclicks(){
   detachInterrupt(0);
   long now = millis();
