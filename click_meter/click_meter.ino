@@ -158,6 +158,13 @@ RTC_DS1307 rtc;
 
 
 
+const int EDSIK_is_rec_eix = EEPROM.length() - 1;
+
+void EDISK_rec_flip() {
+  is_recording = 1 ^ EEPROM.read(EDSIK_is_rec_eix);
+  EEPROM.write(EDSIK_is_rec_eix, is_recording); 
+}
+
 int _EDISK_next_eix(int eix) {
     eix += sizeof(Rec);
     if (eix >= EEPROM.length())
@@ -265,14 +272,16 @@ void send_rtc() {
 }
 
 
-
 void setup(){
   pinMode(GEIGER_PIN, INPUT);
   digitalWrite(GEIGER_PIN,HIGH);
   for (int i = 0; i < NLEDS; i++){
     pinMode(LED_BAR_PINS[i],OUTPUT);
   }
-
+  
+  // Flip REC on boot, to allow to control it.
+  EDISK_rec_flip();
+  
   Serial.begin(19200);
   
   //set up the LCD\'s number of columns and rows:
@@ -299,8 +308,11 @@ void setup(){
   send_rtc();
   Serial << endl;
 
+  // Re-flip REC to remain the same, unless reset.
+  EDISK_rec_flip();
+
   EDISK_nextIx = EDISK_traverse(0);
-  is_recording = EEPROM.read(EEPROM.length() - 1);
+
   #ifdef LOG_BOOT_CONFIG
     send_config();
     send_state(millis());
@@ -357,8 +369,7 @@ void send_state(ulong now) {
 void read_keys(ulong now) {
   char inp = Serial.read();
   if (inp == 'R') {
-    is_recording ^= true;       
-    EEPROM.write(EEPROM.length() - 1, is_recording);
+    EDISK_rec_flip();
     #ifdef LOG_ACTIONS
       Serial << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
     #endif
