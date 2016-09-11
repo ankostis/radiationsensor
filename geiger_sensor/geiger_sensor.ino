@@ -20,6 +20,7 @@
 
 #include <Arduino.h>
 #include <Streaming.h>
+#include <assert.h>
 #include <LiquidCrystal.h>
 #include <RTClib.h>
 #include <EEPROM.h>
@@ -34,14 +35,14 @@
 #ifdef DEBUG
   #define LOG_ACTIONS       // Serial-log commands send over serial (good).
   #define LOG_BOOT_CONFIG   // Serial-log config vars on reset.
-  //#define LOG_NEXT_REC    // Serial-log each rec traversed (much stuff).
-  //#define LOG_NEW_REC     // Serial-log values of each new rec.
+  //#define LOG_REC_VISIT     // Serial-log each rec traversed (much stuff).
+  #define LOG_NEW_REC       // Serial-log values of each new rec.
   #define LOG_LONG_LOOP     // Serial-log entrance to long-loop.
-  #define REC_DISABLED      // Do not actually write EEPROM.
+  //#define REC_DISABLED      // Do not actually write EEPROM.
 #endif
 
 const ulong  SHORT_LOOP_MSEC   = 10 * 1000;
-const ulong  LONG_LOOP_MSEC    = SHORT_LOOP_MSEC * 60;
+const ulong  LONG_LOOP_MSEC    = SHORT_LOOP_MSEC /5;
 
 /** 
  * A uinte-buffer of click timings 
@@ -68,13 +69,15 @@ ulong longLoopMillis            = 0;
 bool is_recording               = false;
 
 volatile uint clicks            = 0;
-volatile int maxCPM           = 0.0;
+volatile int maxCPM             = 0.0;
 
 /** 
  * The `maxCPM uinte-buffer.
  */
 ulong clickTimesBuffer[NCLICK_TIMES] = {0};
 int nextClickIx = 0;
+
+int nextStorageEix              = -1;   // Index in EEPROM to write next rec (avoid scan every time).
 //
 //////////////////////////////////
 
@@ -122,10 +125,26 @@ byte _crc8(const byte *data, byte len) {
   return crc;
 }
 
-
-byte _crc_rec(const Rec &rec) {
+byte _Rec_crc(const Rec &rec) {
   return _crc8((byte *)&rec, sizeof(Rec) - 1);
 }
+
+
+void _Rec_seal(Rec &rec, const DateTime rnow) {
+    rec.tmstmp = _compress_time(rnow.unixtime());
+    rec.crc = _Rec_crc(rec);
+}
+
+
+bool _Rec_is_valid(Rec &rec) {
+  int crc = _Rec_crc(rec);
+    #ifdef LOG_REC_VISIT
+      Serial << F("  calced_crc=") << crc << endl;
+    #endif  
+  return bool(rec.crc == crc);
+}
+
+
 
 
 // Libellium LCD pin numbers.
@@ -133,81 +152,89 @@ LiquidCrystal lcd(3,4,5,6,7,8);
 RTC_DS1307 rtc;
 
 
-/**
- * Traverse all storage-recs untill invalid CRC met.
- * 
- * :param start_ix: index into eeprom to start traversing from, 0-->EEPROM.length()-1
- * :param recHandler_func: a function to handle each valid rec
- * :return: the index of the 1st invalid rec met
- */
-int _STORAGE_traverse(const int start_ix, void (*recHandler_func)(Rec)) {
-  int indx = (start_ix >= EEPROM.length())? 0 : start_ix;
 
+
+int _STORAGE_next_eix(int eix) {
+    eix += sizeof(Rec);
+    if (eix >= EEPROM.length())
+      eix = 0;
+    return eix;
+}
+
+/**
+ * Loops around all storage-recs untill and invalid CRC met or reach start point.
+ * 
+ * :param start_ix:         index into eeprom to start traversing from, 0-->EEPROM.length()-1
+ * :param recHandler_func:  a function receiving each rec and return `false` to break traversal.
+ * :return:                 the index of the 1st invalid rec met
+ */
+int STORAGE_traverse(const int start_ix = INT_MAX, bool (*recHandler_func)(Rec&) = NULL) {
+  
+  int eix = (start_ix < 0 || start_ix >= EEPROM.length())? nextStorageEix : start_ix;
+
+  if (!recHandler_func)
+    recHandler_func = _Rec_is_valid;
+    
   Rec rec;
-  for(; indx < EEPROM.length(); indx += sizeof(Rec)) {
-    EEPROM.get(indx, rec);
-    int crc = _crc_rec(rec);
-    #ifdef LOG_NEXT_REC
-      Serial << F("Check EEPROM: indx=") << indx << F(", crc=") << crc << F(", r.crc=") << rec.crc << endl;
+  do {
+    EEPROM.get(eix, rec);
+    #ifdef LOG_REC_VISIT
+      Serial << F("STORAGE: visit_eix=") << eix << F(", r.crc=") << rec.crc << endl;
     #endif
-    if (rec.crc != crc) 
-      break;
-    if (recHandler_func) {
-      recHandler_func(rec);
-    }
-  }
-  if (indx >= EEPROM.length())
-    indx = 0;
+    
+    if (!recHandler_func(rec))
+      return eix;
+    
+    eix = _STORAGE_next_eix(eix);
+  } while (eix != start_ix);
 
-  return indx;
-}
+  // Reaching here means all Recs were valid:
+  //  --> either BAD STORAGE 
+  //  --> or BAD algo/handler.
+  #ifdef LOG_REC_VISIT
+    Serial << F("STORAGE: Looped around eix: ") << eix << endl;
+  #endif  
 
-/**
- * 2-pass traversal of storage-recs to wrap past the last valid rec, 
- * and detect the begining of uint list-of-recs.
- * 
- * See `_STORAGE_traverse()` for params/return value.
- */
-int STORAGE_traverse(const int start_ix = 0, void (*recHandler_func)(Rec) = NULL) {
-  return _STORAGE_traverse(start_ix, recHandler_func);
-}
-
-
-
-void _seal_rec(Rec &rec) {
-    DateTime rnow = rtc.now();
-    rec.tmstmp = _compress_time(rnow.unixtime());
-    rec.crc = _crc_rec(rec);
+  return eix; // Signal error.
 }
 
 
 void STORAGE_append_rec() {
-    int eix = STORAGE_traverse();
-    Serial << F("Store rec: ") << eix << endl;
+    int eix = nextStorageEix;
 
     Rec rec;
     rec.clicks = clicks;
     rec.maxCPM = maxCPM;
-    _seal_rec(rec);
+    _Rec_seal(rec, rtc.now());
     
     #ifdef LOG_NEW_REC
-      Serial << F("tmstmp, clicks, maxCPM, crc\n");
-      Serial << 0 << "," << clicks << "," << maxCPM  << "," << 0 << endl;
-      Serial << rec.tmstmp << "," << rec.clicks << "," << rec.maxCPM  << "," << rec.crc << endl;
-    #endif LOG_NEW_REC
+      Serial << F("STORAGE append_eix: ") << eix;
+      Serial << F(",tmstmp=") << rec.tmstmp << F(",clicks=") << rec.clicks << F(",maxCPM=") << rec.maxCPM ;
+      Serial << F(",CRC=") << rec.crc << endl;
+    #endif
+    
     #ifndef REC_DISABLED
       EEPROM.put(eix, rec);  
-      EEPROM.write(eix + sizeof(Rec) + 1, 0); // Just to break next CRC.
+    #endif
+    
+    nextStorageEix = _STORAGE_next_eix(eix);
+    
+    #ifndef REC_DISABLED
+      EEPROM.write(nextStorageEix, 0); // Probably breaks next CRC...
     #endif
 }
 
 
 void STORAGE_clear() {
-  EEPROM.write(0, 0); // Breaks CRC.
+  EEPROM.write(0, 0); // Probably breaks CRC...
+  nextStorageEix = 0;
+
 }
 
-void send_rec(Rec &rec) {
-  Serial << _decompress_time(rec.tmstmp) << F(", ") << rec.clicks << F(", ") << rec.maxCPM << endl;
+bool send_rec(Rec &rec) {
+  if (_Rec_is_valid(rec))
+    Serial << _decompress_time(rec.tmstmp) << F(", ") << rec.clicks << F(", ") << rec.maxCPM << endl;
+  return true;
 }
 
 
@@ -268,10 +295,11 @@ void setup(){
   send_rtc();
   Serial << endl;
 
+  nextStorageEix = STORAGE_traverse(0);
   #ifdef LOG_BOOT_CONFIG
     send_config();
+    send_state(millis());
   #endif
-
   Serial << F("CLICKS, MaxCPM" STR(NCLICK_TIMES)) << endl;
   update_stats(0);
 
@@ -312,7 +340,8 @@ void send_state(ulong now) {
   Serial << F("isRec=") << is_recording << F(",");
   Serial << F("clicks=") << clicks << F(",");
   Serial << F("maxCPM=") << maxCPM << F(",");
-  Serial << F("clickTimes=[");
+  Serial << F("nextStorageEix=") << nextStorageEix << F(",");
+  Serial << F("\n  clickTimes=[");
   for (int i = 0; i < NCLICK_TIMES; i++)
     Serial << (now - clickTimesBuffer[i]) << F(",");
   Serial << F("]\n");
@@ -348,7 +377,7 @@ void read_keys(ulong now) {
     // prints storage to serial.
     
     Serial << F("Recorded data::\ntime,clicks,maxCPM") << endl;
-    STORAGE_traverse(0, send_rec);
+    STORAGE_traverse(nextStorageEix, send_rec);
     
   } else if ( (inp | 1<<5) == 'h') {
     Serial << F("R - > Record on/off!\nC -> Clear store(!)\ns -> log Status\n<p> -> Play recording\n");

@@ -23,6 +23,7 @@
 
 typedef unsigned int  uint;
 typedef unsigned long ulong;
+const int INT_MAX = 2147483647;
 
 /**
  *  EEPROM record:
@@ -38,7 +39,8 @@ typedef struct _Rec {
   byte crc;
 } Rec;
 
-int STORAGE_traverse(int start_ix = 0, void (*printout)(Rec) = NULL);
+int STORAGE_traverse(int start_ix = INT_MAX, bool (*printout)(Rec&) = NULL);
+void send_state(ulong now);
 
 #define ARRAYLEN(x) sizeof((x)) / sizeof((x)[0])
 // Trick from http://stackoverflow.com/questions/5459868/c-preprocessor-concatenate-int-to-string
