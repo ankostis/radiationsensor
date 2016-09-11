@@ -281,8 +281,6 @@ void setup(){
     pinMode(LED_BAR_PINS[i],OUTPUT);
   }
   
-  // Flip REC on boot, to allow to control it.
-  EDISK_rec_flip();
   
   Serial.begin(19200);
   
@@ -297,11 +295,18 @@ void setup(){
     lcd.scrollDisplayLeft();
   }
 
+  // Flip REC on boot, to allow to control it.
+  EDISK_rec_flip();
+
   lcd.clear();
   lcd <<  __DATE__ ;  
   lcd.setCursor(0,1);
   lcd << __TIME__;
   delay(1700);
+
+  // Re-flip REC to remain the same, unless reset.
+  EDISK_rec_flip();
+  EDISK_nextIx = EDISK_traverse(0);
 
   Serial << F("PROG: " __DATE__ ", " __TIME__) << endl;
   init_RTC();
@@ -309,11 +314,6 @@ void setup(){
   Serial << F("RTC: ");
   send_rtc();
   Serial << endl;
-
-  // Re-flip REC to remain the same, unless reset.
-  EDISK_rec_flip();
-
-  EDISK_nextIx = EDISK_traverse(0);
 
   #ifdef LOG_BOOT_CONFIG
     send_config();
