@@ -300,6 +300,7 @@ void setup(){
   Serial << endl;
 
   EDISK_nextIx = EDISK_traverse(0);
+  is_recording = EEPROM.read(EEPROM.length() - 1);
   #ifdef LOG_BOOT_CONFIG
     send_config();
     send_state(millis());
@@ -357,6 +358,7 @@ void read_keys(ulong now) {
   char inp = Serial.read();
   if (inp == 'R') {
     is_recording ^= true;       
+    EEPROM.write(EEPROM.length() - 1, is_recording);
     #ifdef LOG_ACTIONS
       Serial << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
     #endif
