@@ -47,7 +47,7 @@ const ulong  LONG_LOOP_MSEC    = SHORT_LOOP_MSEC * 60;
  * A uinte-buffer of click timings 
  * used to derive `maxCPM` among those elements.
  */
-#define     NMAX_CPM            5   // Size of `maxCPM` timestamp-buffer.
+#define     NCLICK_TIMES          5   // Size of `maxCPM` timestamp-buffer.
 /** Threshold `maxCPM` values for the led bar (==NLEDS). */
 const int LED_BAR_THRESH[]      = {30, 70, 150, 350, 800};
 //
@@ -73,7 +73,7 @@ volatile int maxCPM           = 0.0;
 /** 
  * The `maxCPM uinte-buffer.
  */
-ulong clickTimesBuffer[NMAX_CPM] = {0};
+ulong clickTimesBuffer[NCLICK_TIMES] = {0};
 int nextClickIx = 0;
 //
 //////////////////////////////////
@@ -272,7 +272,7 @@ void setup(){
     send_config();
   #endif
 
-  Serial << F("CLICKS, MaxCPM" STR(NMAX_CPM)) << endl;
+  Serial << F("CLICKS, MaxCPM" STR(NCLICK_TIMES)) << endl;
   update_stats(0);
 
   shortLoopMillis = longLoopMillis = millis();
@@ -292,29 +292,29 @@ void update_stats(int send_serial) {
     lcd.setCursor(11, 0);
     lcd << "Rec=" << is_recording;
     lcd.setCursor(0, 1);
-    lcd << "MaxCPM" STR(NMAX_CPM) "=" << maxCPM;
+    lcd << "MaxCPM" STR(NCLICK_TIMES) "=" << maxCPM;
 }
 
 
 void send_config() {
-  Serial << F("ShortLoop: ") << SHORT_LOOP_MSEC << ",";
-  Serial << F("LongLoop: ") << LONG_LOOP_MSEC << ",";
-  Serial << F("MaxCPMBuf: ") << NMAX_CPM << ",";
-  Serial << F("LedThresh: ");
+  Serial << F("ShortMs=") << SHORT_LOOP_MSEC << ",";
+  Serial << F("LongNs=") << LONG_LOOP_MSEC << ",";
+  Serial << F("NClickTimes=") << NCLICK_TIMES << ",";
+  Serial << F("LedThresh=[");
   for (int i = 0; i < NLEDS; i++)
     Serial << LED_BAR_THRESH[i] << F(",");
   Serial << F("]\n");
 }
 
 void send_state(ulong now) {
-  Serial << F("shortLoopETA=") << (SHORT_LOOP_MSEC - now + shortLoopMillis) << F(",");
-  Serial << F("longLoopETA=") << (LONG_LOOP_MSEC - now + longLoopMillis) << F(",");
-  Serial << F("is_recording=") << is_recording << F(",");
+  Serial << F("shortETA=") << (SHORT_LOOP_MSEC - now + shortLoopMillis) << F(",");
+  Serial << F("longETA=") << (LONG_LOOP_MSEC - now + longLoopMillis) << F(",");
+  Serial << F("isRec=") << is_recording << F(",");
   Serial << F("clicks=") << clicks << F(",");
   Serial << F("maxCPM=") << maxCPM << F(",");
-  Serial << F("clickTimesBuffer=[");
-  for (int i = 0; i < NMAX_CPM; i++)
-    Serial << clickTimesBuffer[i] << F(",");
+  Serial << F("clickTimes=[");
+  for (int i = 0; i < NCLICK_TIMES; i++)
+    Serial << (now - clickTimesBuffer[i]) << F(",");
   Serial << F("]\n");
 }
 
@@ -418,11 +418,11 @@ void INT_countPulseclicks(){
   
   clickTimesBuffer[nextClickIx] = now;
   nextClickIx++;
-  if (nextClickIx == NMAX_CPM) {
+  if (nextClickIx == NCLICK_TIMES) {
     nextClickIx = 0;
   }
   
-  int CPM = int(NMAX_CPM * 60000.0 / (now - clickTimesBuffer[nextClickIx]));
+  int CPM = int(NCLICK_TIMES * 60000.0 / (now - clickTimesBuffer[nextClickIx]));
   update_leds(CPM);
   
   if (maxCPM < CPM)
