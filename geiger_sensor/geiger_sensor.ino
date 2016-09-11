@@ -32,8 +32,9 @@
 #define DEBUG
 
 #ifdef DEBUG
-  #define LOG_NEXT_REC    // Serial-log each rec traversed (much stuff).
-  #define LOG_NEW_REC     // Serial-log values of each new rec.
+  #define LOG_BOOT_CONFIG   // Serial-log config vars on reset.
+  //#define LOG_NEXT_REC    // Serial-log each rec traversed (much stuff).
+  //#define LOG_NEW_REC     // Serial-log values of each new rec.
   #define LOG_LONG_LOOP   // Serial-log entrance to long-loop.
   #define REC_DISABLED    // Do not actually write EEPROM.
 #endif
@@ -45,7 +46,7 @@ const ulong  LONG_LOOP_MSEC    = SHORT_LOOP_MSEC * 60;
  * A uinte-buffer of click timings 
  * used to derive `maxCPM` among those elements.
  */
-#define     NMAX_CPM            5   // Size of `maxCPM` uint-buffer.
+#define     NMAX_CPM            5   // Size of `maxCPM` timestamp-buffer.
 /** Threshold `maxCPM` values for the led bar (==NLEDS). */
 const int LED_BAR_THRESH[]      = {30, 70, 150, 350, 800};
 //
@@ -226,10 +227,11 @@ void send_rtc() {
   if (rtc.isrunning()) {
     DateTime now = rtc.now();
     
-    Serial << F("RTC: ") << now.year() << '/' << now.month() << '/' << now.day();
+    Serial << now.year() << '/' << now.month() << '/' << now.day();
     Serial << F("-") << now.hour() << ':' << now.minute() << ':' << now.second() << ',';  
   }
 }
+
 
 
 void setup(){
@@ -260,8 +262,15 @@ void setup(){
 
   Serial << F("PROG: " __DATE__ ", " __TIME__) << endl;
   init_RTC();
+  
+  Serial << F("RTC: ");
   send_rtc();
   Serial << endl;
+
+  #ifdef LOG_BOOT_CONFIG
+    send_config();
+  #endif
+
   Serial << F("CLICKS, MaxCPM" STR(NMAX_CPM)) << endl;
   update_stats(0);
 
@@ -286,6 +295,29 @@ void update_stats(int send_serial) {
 }
 
 
+void send_config() {
+  Serial << F("ShortLoop: ") << SHORT_LOOP_MSEC << ",";
+  Serial << F("LongLoop: ") << LONG_LOOP_MSEC << ",";
+  Serial << F("MaxCPMBuf: ") << NMAX_CPM << ",";
+  Serial << F("LedThresh: ");
+  for (int i = 0; i < NLEDS; i++)
+    Serial << LED_BAR_THRESH[i] << F(",");
+  Serial << F("]\n");
+}
+
+void send_state() {
+  Serial << F("shortLoopMillis=") << shortLoopMillis << F(",");
+  Serial << F("longLoopMillis=") << longLoopMillis << F(",");
+  Serial << F("is_recording=") << is_recording << F(",");
+  Serial << F("clicks=") << clicks << F(",");
+  Serial << F("maxCPM=[") << maxCPM << F(",");
+  for (int i = 0; i < NMAX_CPM; i++)
+    Serial << lastClickMillis[i] << F(",");
+  Serial << F("]\n");
+}
+
+
+
 void read_keys() {
   char inp = Serial.read();
   if (inp == 'R') {
@@ -306,22 +338,24 @@ void read_keys() {
     lcd << F("Storage cleared!");
     
   
+  } else if ( (inp | 1<<5) == 's') {
+    send_config();
+    send_state();
+    
+  } else if ( (inp | 1<<5) == 'p') {
+    // prints storage to serial.
+    
+    Serial << F("time,clicks,maxCPM") << endl;
+    STORAGE_traverse(0, send_rec);
   } else if ( (inp | 1<<5) == 'h') {
     #ifdef DEBUG
-      Serial << F("R - > Record on/off!\nC -> Clear store(!)\n<any> -> Print store\n");
+      Serial << F("R - > Record on/off!\nC -> Clear store(!)\ns -> log Status\n<p> -> Play recording\n");
     #endif
     STORAGE_clear();
     lcd.clear();
     lcd << F("R:rec1/0 C:clear");
     lcd.setCursor(0, 1);
-    lcd << F("<any>:print store");
-
-  
-  } else if (inp > 0) {
-    // Any key prints storage to serial.
-    
-    Serial << F("time,clicks,maxCPM") << endl;
-    STORAGE_traverse(send_rec);
+    lcd << F("p:play s:status");
   }
 }
 
