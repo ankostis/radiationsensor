@@ -22,33 +22,63 @@
  *  Implementation:    Marcos Yarza
  */
 
+#include <EEPROM.h>
 #include <Streaming.h>
 #include <LiquidCrystal.h>
+#include <RTClib.h>
 
-// initialize the library with the numbers of the interface pins
-LiquidCrystal lcd(3,4,5,6,7,8);
 
 // Trick from http://stackoverflow.com/questions/5459868/c-preprocessor-concatenate-int-to-string
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
-// Threshold values for the led bar
-#define NLEDS 5
-int LED_THRESH[] = {30, 70, 150, 350, 800};
+// J305βγ Conversion factor - CPM to uSV/h
+const float CONV_FACTOR = 0.00812;
+const int ledArray [] = {10,11,12,13,9};
+const int geiger_input = 2;
 
-// Conversion factor - CPM to uSV/h
-#define CONV_FACTOR 0.00812
 
-// Variables
-int ledArray [] = {10,11,12,13,9};
-int geiger_input = 2;
-long previous10secMillis = 0;
-volatile int count = 0;
-
+/** 
+ * A circulare-buffer of click timings.
+ */
 #define NMAX_CPM 5
 long lastClickMillis[NMAX_CPM] = {0};
 int nextClickIx = 0;
+
 volatile float maxCPM = 0.0;
+// maxCPM threshold values for the led bar
+const int NLEDS = 5;
+int LED_THRESH[] = {30, 70, 150, 350, 800};
+
+// initialize the library with the numbers of the interface pins
+LiquidCrystal lcd(3,4,5,6,7,8);
+
+long loopMillis = 0;
+volatile int count = 0;
+
+
+RTC_DS1307 rtc;
+void init_RTC() {
+  if (! rtc.begin()) {
+      Serial << F("Couldn't find RTC") << endl;
+  } else {
+    if (! rtc.isrunning()) {
+      Serial << F("Initializing RTC time!") << endl;
+      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+      // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+    }
+  }
+}
+
+void send_rtc() {
+  if (rtc.isrunning()) {
+    DateTime now = rtc.now();
+    
+    Serial << F("RTC: ") << now.year() << '/' << now.month() << '/' << now.day();
+    Serial << F("-") << now.hour() << ':' << now.minute() << ':' << now.second() << ',';  
+  }
+}
+
 
 void update_stats(int send_serial) {
     if (send_serial) {
@@ -57,9 +87,7 @@ void update_stats(int send_serial) {
     
     lcd.clear();    
 
-    //lcd.setCursor(0,0);
     lcd << "C10SEC=" << count;
-
     lcd.setCursor(0, 1);
     lcd << "MaxCPM" STR(NMAX_CPM) "=" << _FLOAT(maxCPM, 4);
 }
@@ -73,7 +101,6 @@ void update_leds(float CPM) {
   }
 }
 
-
 void setup(){
   pinMode(geiger_input, INPUT);
   digitalWrite(geiger_input,HIGH);
@@ -82,8 +109,7 @@ void setup(){
   }
 
   Serial.begin(19200);
-
-
+  
   //set up the LCD\'s number of columns and rows:
   lcd.begin(16, 2);
   lcd.clear();
@@ -96,13 +122,15 @@ void setup(){
   }
 
   lcd.clear();
-  //lcd.setCursor(0, 0);
   lcd <<  __DATE__ ;  
   lcd.setCursor(0,1);
   lcd << __TIME__;
   delay(1700);
 
   Serial << F("PROG: " __DATE__ ", " __TIME__) << endl;
+  init_RTC();
+  send_rtc();
+  Serial << endl;
   Serial << F("CLICKS, MaxCPM" STR(NMAX_CPM)) << endl;
   update_stats(0);
 
@@ -110,8 +138,9 @@ void setup(){
 }
 
 void loop(){
-  if (millis() - previous10secMillis > 10000) {
-    previous10secMillis = millis();
+  long now = millis();
+  if (now - loopMillis > 10000) {
+    loopMillis = now;
     update_stats(1);
 
     count = maxCPM = 0;
