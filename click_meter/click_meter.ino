@@ -79,6 +79,7 @@ ulong clickTimesBuffer[NCLICK_TIMES] = {0};
 int nextClickIx = 0;
 
 int EDISK_nextIx                = -1;   // Index in EEPROM to write next rec (avoid scan every time).
+int EDISC_nrecs_saved           = 0;
 //
 //////////////////////////////////
 
@@ -233,6 +234,7 @@ void EDISK_append_rec() {
     #ifndef REC_DISABLED
       EEPROM.write(EDISK_nextIx, 0); // Probably breaks next CRC...
     #endif
+    EDISC_nrecs_saved++;
 }
 
 
@@ -333,11 +335,15 @@ void update_stats(int send_serial) {
     
     lcd.clear();    
 
-    lcd << "C10Sec=" << clicks;
-    lcd.setCursor(11, 0);
-    lcd << "Rec=" << is_recording;
+    lcd << "C10S=" << clicks;
+    lcd.setCursor(9, 0);
+    lcd << "Rec=";
+    if (is_recording)
+      lcd << EDISC_nrecs_saved;
+    else
+      lcd << F("_");
     lcd.setCursor(0, 1);
-    lcd << "MaxCPM" STR(NCLICK_TIMES) "=" << maxCPM;
+    lcd << "CPM" STR(NCLICK_TIMES) "=" << maxCPM;
 }
 
 
