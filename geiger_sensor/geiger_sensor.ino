@@ -1,5 +1,5 @@
 /*  
- *  Arduino Geiger Counter - Radiation Sensor Board + RTC + EEPROM storage
+ *  Arduino Geiger Counter - Radiation Sensor Board + RTC + EEPROM storage (edisk)
  *  
  *  Copyright (C) ankostis@gmail.com & Libelium Comunicaciones Distribuidas S.L. 
  *  http://www.libelium.com
@@ -25,31 +25,32 @@
 #include <RTClib.h>
 #include <EEPROM.h>
 
-#include "recstorage.h"
+#include "clickmeter.h"
 
 
 ////////// USER CONFIG ///////////
 //
-#define DEBUG
+#define DEBUG_LOG
 
-#ifdef DEBUG
-  #define LOG_ACTIONS       // Serial-log commands send over serial (good).
-  #define LOG_BOOT_CONFIG   // Serial-log config vars on reset.
-  //#define LOG_REC_VISIT     // Serial-log each rec traversed (much stuff).
-  #define LOG_NEW_REC       // Serial-log values of each new rec.
-  #define LOG_LONG_LOOP     // Serial-log entrance to long-loop.
-  //#define REC_DISABLED      // Do not actually write EEPROM.
+#ifdef DEBUG_LOG
+  #define LOG_ACTIONS           // Serial-log commands send over serial (good).
+  #define LOG_BOOT_CONFIG       // Serial-log config vars on reset.
+//  #define LOG_REC_VISIT         // Serial-log each rec traversed (much stuff).
+  #define LOG_NEW_REC           // Serial-log values of each new rec.
+  #define LOG_EDISK_INTERVAL    // Serial-log entrance to long-loop.
 #endif
 
-const ulong  SHORT_LOOP_MSEC   = 10 * 1000;
-const ulong  LONG_LOOP_MSEC    = SHORT_LOOP_MSEC /5;
+//#define REC_DISABLED          // Do not actually write EEPROM (norrmaly off).
+
+#define STATS_DELAY_SEC         10L   // Short, to detect "max" CPMs & update LCD.
+#define EDISK_DELAY_SEC         1500L // Longer, 600-->10min: ~1 day fits in edisk(EEPROM).
 
 /** 
- * A uinte-buffer of click timings 
- * used to derive `maxCPM` among those elements.
+ * The buffer of click timestamps is used 
+ * to derive `maxCPM` among those number of elements every `STATS_DELAY_SEC`.
  */
 #define     NCLICK_TIMES          5   // Size of `maxCPM` timestamp-buffer.
-/** Threshold `maxCPM` values for the led bar (==NLEDS). */
+/** Threshold `maxCPM` values for the led bar (len==NLEDS). */
 const int LED_BAR_THRESH[]      = {30, 70, 150, 350, 800};
 //
 //////////////////////////////////
@@ -64,23 +65,26 @@ const float SIEVERT_CONV_FACTOR = 0.00812;
 
 //////////// GLOBALS /////////////
 //
-ulong shortLoopMillis           = 0;
-ulong longLoopMillis            = 0;
+ulong lastStatsMs               = 0;
+ulong lastEdiskMs               = 0;
 bool is_recording               = false;
 
 volatile uint clicks            = 0;
 volatile int maxCPM             = 0.0;
 
 /** 
- * The `maxCPM uinte-buffer.
+ * The `maxCPM` click-timings buffer.
  */
 ulong clickTimesBuffer[NCLICK_TIMES] = {0};
 int nextClickIx = 0;
 
-int nextStorageEix              = -1;   // Index in EEPROM to write next rec (avoid scan every time).
+int EDISK_nextIx                = -1;   // Index in EEPROM to write next rec (avoid scan every time).
 //
 //////////////////////////////////
 
+
+const ulong  STATS_DELAY_MSEC   = STATS_DELAY_SEC * 1000L;
+const ulong  EDISK_DELAY_MSEC   = EDISK_DELAY_SEC * 1000L;
 
 /**
  * Compress timestamps by storing them as 10-min offsets 
@@ -99,11 +103,11 @@ const ulong MYEPOCH_sec = MYEPOCH.unixtime();
 
 uint _compress_time(ulong sec) {
   //Serial << "TCOMP: " << sec << ", " << MYEPOCH_sec << ", " <<  ((sec - MYEPOCH_sec) /60/10) << endl;
-  return (sec - MYEPOCH_sec) / 60 / 10; 
+  return (sec - MYEPOCH_sec) / EDISK_DELAY_SEC; 
 }
 
 ulong _decompress_time(uint tenmins) {
-  return MYEPOCH_sec + tenmins * 10 * 60; 
+  return MYEPOCH_sec + tenmins * EDISK_DELAY_SEC; 
 }
 
 
@@ -154,7 +158,7 @@ RTC_DS1307 rtc;
 
 
 
-int _STORAGE_next_eix(int eix) {
+int _EDISK_next_eix(int eix) {
     eix += sizeof(Rec);
     if (eix >= EEPROM.length())
       eix = 0;
@@ -162,15 +166,15 @@ int _STORAGE_next_eix(int eix) {
 }
 
 /**
- * Loops around all storage-recs untill and invalid CRC met or reach start point.
+ * Loops around all EDISK-recs untill and invalid CRC met or reach start point.
  * 
  * :param start_ix:         index into eeprom to start traversing from, 0-->EEPROM.length()-1
  * :param recHandler_func:  a function receiving each rec and return `false` to break traversal.
  * :return:                 the index of the 1st invalid rec met
  */
-int STORAGE_traverse(const int start_ix = INT_MAX, bool (*recHandler_func)(Rec&) = NULL) {
+int EDISK_traverse(const int start_ix = INT_MAX, bool (*recHandler_func)(Rec&) = NULL) {
   
-  int eix = (start_ix < 0 || start_ix >= EEPROM.length())? nextStorageEix : start_ix;
+  int eix = (start_ix < 0 || start_ix >= EEPROM.length())? EDISK_nextIx : start_ix;
 
   if (!recHandler_func)
     recHandler_func = _Rec_is_valid;
@@ -179,28 +183,28 @@ int STORAGE_traverse(const int start_ix = INT_MAX, bool (*recHandler_func)(Rec&)
   do {
     EEPROM.get(eix, rec);
     #ifdef LOG_REC_VISIT
-      Serial << F("STORAGE: visit_eix=") << eix << F(", r.crc=") << rec.crc << endl;
+      Serial << F("EDISK: visit_eix=") << eix << F(", r.crc=") << rec.crc << endl;
     #endif
     
     if (!recHandler_func(rec))
       return eix;
     
-    eix = _STORAGE_next_eix(eix);
+    eix = _EDISK_next_eix(eix);
   } while (eix != start_ix);
 
   // Reaching here means all Recs were valid:
-  //  --> either BAD STORAGE 
+  //  --> either BAD EDISK 
   //  --> or BAD algo/handler.
   #ifdef LOG_REC_VISIT
-    Serial << F("STORAGE: Looped around eix: ") << eix << endl;
+    Serial << F("EDISK: Looped around eix: ") << eix << endl;
   #endif  
 
   return eix; // Signal error.
 }
 
 
-void STORAGE_append_rec() {
-    int eix = nextStorageEix;
+void EDISK_append_rec() {
+    int eix = EDISK_nextIx;
 
     Rec rec;
     rec.clicks = clicks;
@@ -208,7 +212,7 @@ void STORAGE_append_rec() {
     _Rec_seal(rec, rtc.now());
     
     #ifdef LOG_NEW_REC
-      Serial << F("STORAGE append_eix: ") << eix;
+      Serial << F("EDISK append_eix: ") << eix;
       Serial << F(",tmstmp=") << rec.tmstmp << F(",clicks=") << rec.clicks << F(",maxCPM=") << rec.maxCPM ;
       Serial << F(",CRC=") << rec.crc << endl;
     #endif
@@ -217,17 +221,17 @@ void STORAGE_append_rec() {
       EEPROM.put(eix, rec);  
     #endif
     
-    nextStorageEix = _STORAGE_next_eix(eix);
+    EDISK_nextIx = _EDISK_next_eix(eix);
     
     #ifndef REC_DISABLED
-      EEPROM.write(nextStorageEix, 0); // Probably breaks next CRC...
+      EEPROM.write(EDISK_nextIx, 0); // Probably breaks next CRC...
     #endif
 }
 
 
-void STORAGE_clear() {
+void EDISK_clear() {
   EEPROM.write(0, 0); // Probably breaks CRC...
-  nextStorageEix = 0;
+  EDISK_nextIx = 0;
 
 }
 
@@ -295,7 +299,7 @@ void setup(){
   send_rtc();
   Serial << endl;
 
-  nextStorageEix = STORAGE_traverse(0);
+  EDISK_nextIx = EDISK_traverse(0);
   #ifdef LOG_BOOT_CONFIG
     send_config();
     send_state(millis());
@@ -303,7 +307,7 @@ void setup(){
   Serial << F("CLICKS, MaxCPM" STR(NCLICK_TIMES)) << endl;
   update_stats(0);
 
-  shortLoopMillis = longLoopMillis = millis();
+  lastStatsMs = lastEdiskMs = millis();
   attachInterrupt(0,INT_countPulseclicks,FALLING);
 }
 
@@ -325,22 +329,22 @@ void update_stats(int send_serial) {
 
 
 void send_config() {
-  Serial << F("ShortMs=") << SHORT_LOOP_MSEC << ",";
-  Serial << F("LongNs=") << LONG_LOOP_MSEC << ",";
+  Serial << F("StatsDelayMs=") << STATS_DELAY_MSEC << ",";
+  Serial << F("EdiskDelayMs=") << EDISK_DELAY_MSEC << ",";
   Serial << F("NClickTimes=") << NCLICK_TIMES << ",";
-  Serial << F("LedThresh=[");
+  Serial << F("LedsThresh=[");
   for (int i = 0; i < NLEDS; i++)
     Serial << LED_BAR_THRESH[i] << F(",");
   Serial << F("]\n");
 }
 
 void send_state(ulong now) {
-  Serial << F("shortETA=") << (SHORT_LOOP_MSEC - now + shortLoopMillis) << F(",");
-  Serial << F("longETA=") << (LONG_LOOP_MSEC - now + longLoopMillis) << F(",");
+  Serial << F("StatsETA=") << (STATS_DELAY_MSEC - now + lastStatsMs) << F(",");
+  Serial << F("EdiskETA=") << (EDISK_DELAY_MSEC - now + lastEdiskMs) << F(",");
   Serial << F("isRec=") << is_recording << F(",");
   Serial << F("clicks=") << clicks << F(",");
   Serial << F("maxCPM=") << maxCPM << F(",");
-  Serial << F("nextStorageEix=") << nextStorageEix << F(",");
+  Serial << F("EDISK_nextIx=") << EDISK_nextIx << F(",");
   Serial << F("\n  clickTimes=[");
   for (int i = 0; i < NCLICK_TIMES; i++)
     Serial << (now - clickTimesBuffer[i]) << F(",");
@@ -362,11 +366,11 @@ void read_keys(ulong now) {
   
   } else if (inp == 'C') {
     #ifdef LOG_ACTIONS
-      Serial << F("Clearing Storage!") << endl;
+      Serial << F("Clearing EDISK!") << endl;
     #endif
-    STORAGE_clear();
+    EDISK_clear();
     lcd.clear();
-    lcd << F("Storage cleared!");
+    lcd << F("EDISK cleared!");
     
   
   } else if ( (inp | 1<<5) == 's') {
@@ -374,14 +378,14 @@ void read_keys(ulong now) {
     send_state(now);
     
   } else if ( (inp | 1<<5) == 'p') {
-    // prints storage to serial.
+    // prints EDISK to serial.
     
     Serial << F("Recorded data::\ntime,clicks,maxCPM") << endl;
-    STORAGE_traverse(nextStorageEix, send_rec);
+    EDISK_traverse(EDISK_nextIx, send_rec);
     
   } else if ( (inp | 1<<5) == 'h') {
     Serial << F("R - > Record on/off!\nC -> Clear store(!)\ns -> log Status\n<p> -> Play recording\n");
-    STORAGE_clear();
+    EDISK_clear();
     lcd.clear();
     lcd << F("R:rec1/0 C:clear");
     lcd.setCursor(0, 1);
@@ -404,8 +408,8 @@ void loop(){
 
   // SHORT loop
   //
-  if (now - shortLoopMillis > SHORT_LOOP_MSEC) {
-    shortLoopMillis = now;
+  if (now - lastStatsMs > STATS_DELAY_MSEC) {
+    lastStatsMs = now;
     update_stats(1);
     clicks = maxCPM = 0;
   } // short loop
@@ -413,13 +417,13 @@ void loop(){
 
   // LONG loop
   //
-  if (now - longLoopMillis > LONG_LOOP_MSEC) {
-    longLoopMillis = now;
-    #ifdef LOG_LONG_LOOP
+  if (now - lastEdiskMs > EDISK_DELAY_MSEC) {
+    lastEdiskMs = now;
+    #ifdef LOG_EDISK_INTERVAL
        Serial << F("Long loop: REC=") << is_recording << endl; 
     #endif
     if (is_recording) {
-      STORAGE_append_rec();
+      EDISK_append_rec();
     }
   } // long loop
 }
