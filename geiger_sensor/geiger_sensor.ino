@@ -27,48 +27,53 @@
 #include "recstorage.h"
 
 
+////////// USER CONFIG ///////////
+//
 #define DEBUG
 
 #ifdef DEBUG
-  #define D_NEXT_REC
-  #define D_NEW_REC
-  #define D_LONG_LOOP
+  #define LOG_NEXT_REC    // Serial-log each rec traversed (much stuff).
+  #define LOG_NEW_REC     // Serial-log values of each new rec.
+  #define LOG_LONG_LOOP   // Serial-log entrance to long-loop.
+  #define REC_DISABLED    // Do not actually write EEPROM.
 #endif
 
-const long SHORT_LOOP_MSEC  = 10 * 1000;
-const long LONG_LOOP_MSEC   = SHORT_LOOP_MSEC * 60;
+const ulong  SHORT_LOOP_MSEC   = 10 * 1000;
+const ulong  LONG_LOOP_MSEC    = SHORT_LOOP_MSEC * 60;
 
 /** 
- * A circulare-buffer of click timings 
- * used to derive `maxCPM`.
+ * A uinte-buffer of click timings 
+ * used to derive `maxCPM` among those elements.
  */
-#define NMAX_CPM 5
-unsigned long lastClickMillis[NMAX_CPM] = {0};
-int nextClickIx = 0;
-
-/**
- * `maxCPM` threshold values for the led bar.
- */
-const int NLEDS = 5;
-const int LED_THRESH[] = {30, 70, 150, 350, 800};
-
-// Trick from http://stackoverflow.com/questions/5459868/c-preprocessor-concatenate-int-to-string
-#define STR_HELPER(x) #x
-#define STR(x) STR_HELPER(x)
+#define     NMAX_CPM            5   // Size of `maxCPM` uint-buffer.
+/** Threshold `maxCPM` values for the led bar (==NLEDS). */
+const int LED_BAR_THRESH[]      = {30, 70, 150, 350, 800};
+//
+//////////////////////////////////
 
 
-// J305βγ Conversion factor - CPM to uSV/h
-const float CONV_FACTOR = 0.00812;
-const int GEIGER_PIN = 2;
-const int LED_ARRAY [] = {10,11,12,13,9};
+const int   LED_BAR_PINS []     = {10,11,12,13,9};
+const int   NLEDS               = ARRAYLEN(LED_BAR_PINS);
+const int   GEIGER_PIN          = 2;
+/** J305βγ Conversion factor [CPM to uSV/h] - unused, for my reference. */
+const float SIEVERT_CONV_FACTOR = 0.00812;
+
 
 //////////// GLOBALS /////////////
-unsigned long shortLoopMillis = 0;
-unsigned long longLoopMillis = 0;
-bool is_recording = false;
+//
+ulong shortLoopMillis           = 0;
+ulong longLoopMillis            = 0;
+bool is_recording               = false;
 
-volatile int clicks = 0;
-volatile float maxCPM = 0.0;
+volatile uint clicks            = 0;
+volatile float maxCPM           = 0.0;
+
+/** 
+ * The `maxCPM uinte-buffer.
+ */
+ulong lastClickMillis[NMAX_CPM] = {0};
+int nextClickIx = 0;
+//
 //////////////////////////////////
 
 
@@ -84,15 +89,15 @@ volatile float maxCPM = 0.0;
  */
  // MYEPOCH expressed from EPOCH(1970/1/1)
 const DateTime MYEPOCH(2016, 9, 11);
-const long MYEPOCH_sec = MYEPOCH.unixtime();
+const ulong MYEPOCH_sec = MYEPOCH.unixtime();
 
 
-unsigned int _compress_time(long sec) {
+uint _compress_time(ulong sec) {
   //Serial << "TCOMP: " << sec << ", " << MYEPOCH_sec << ", " <<  ((sec - MYEPOCH_sec) /60/10) << endl;
   return (sec - MYEPOCH_sec) / 60 / 10; 
 }
 
-long _decompress_time(unsigned int tenmins) {
+ulong _decompress_time(uint tenmins) {
   return MYEPOCH_sec + tenmins * 10 * 60; 
 }
 
@@ -129,15 +134,18 @@ RTC_DS1307 rtc;
 /**
  * Traverse all storage-recs untill invalid CRC met.
  * 
+ * :param start_ix: index into eeprom to start traversing from, 0-->EEPROM.length()-1
  * :param recHandler_func: a function to handle each valid rec
+ * :return: the index of the 1st invalid rec met
  */
-int STORAGE_traverse(void (*recHandler_func)(Rec) = NULL) {
-  int indx = 0;
+int _STORAGE_traverse(const int start_ix, void (*recHandler_func)(Rec)) {
+  int indx = (start_ix >= EEPROM.length())? 0 : start_ix;
+
   Rec rec;
   for(; indx < EEPROM.length(); indx += sizeof(Rec)) {
     EEPROM.get(indx, rec);
     int crc = _crc_rec(rec);
-    #ifdef D_NEXT_REC
+    #ifdef LOG_NEXT_REC
       Serial << F("Check EEPROM: indx=") << indx << F(", crc=") << crc << F(", r.crc=") << rec.crc << endl;
     #endif
     if (rec.crc != crc) 
@@ -146,10 +154,22 @@ int STORAGE_traverse(void (*recHandler_func)(Rec) = NULL) {
       recHandler_func(rec);
     }
   }
-  indx &= EEPROM.length() - 1;
+  if (indx >= EEPROM.length())
+    indx = 0;
 
   return indx;
 }
+
+/**
+ * 2-pass traversal of storage-recs to wrap past the last valid rec, 
+ * and detect the begining of uint list-of-recs.
+ * 
+ * See `_STORAGE_traverse()` for params/return value.
+ */
+int STORAGE_traverse(const int start_ix = 0, void (*recHandler_func)(Rec) = NULL) {
+  return _STORAGE_traverse(start_ix, recHandler_func);
+}
+
 
 
 void _seal_rec(Rec &rec) {
@@ -168,13 +188,15 @@ void STORAGE_append_rec() {
     rec.maxCPM = int(maxCPM);
     _seal_rec(rec);
     
-    #ifdef D_NEW_REC
+    #ifdef LOG_NEW_REC
       Serial << F("tmstmp, clicks, maxCPM, crc\n");
       Serial << 0 << "," << clicks << "," << maxCPM  << "," << 0 << endl;
       Serial << rec.tmstmp << "," << rec.clicks << "," << rec.maxCPM  << "," << rec.crc << endl;
-    #endif D_NEW_REC
-    //EEPROM.put(eix, rec);  
-    //EEPROM.write(eix + sizeof(Rec) + 1, 0); // Just to break next CRC.
+    #endif LOG_NEW_REC
+    #ifndef REC_DISABLED
+      EEPROM.put(eix, rec);  
+      EEPROM.write(eix + sizeof(Rec) + 1, 0); // Just to break next CRC.
+    #endif
 }
 
 
@@ -213,8 +235,8 @@ void send_rtc() {
 void setup(){
   pinMode(GEIGER_PIN, INPUT);
   digitalWrite(GEIGER_PIN,HIGH);
-  for (int i=0;i<5;i++){
-    pinMode(LED_ARRAY[i],OUTPUT);
+  for (int i = 0; i < NLEDS; i++){
+    pinMode(LED_BAR_PINS[i],OUTPUT);
   }
 
   Serial.begin(19200);
@@ -286,7 +308,7 @@ void read_keys() {
   
   } else if ( (inp | 1<<5) == 'h') {
     #ifdef DEBUG
-      Serial << F("R - > Record on/off!\nC -> Clear store\n<any> -> Print store(!)\n");
+      Serial << F("R - > Record on/off!\nC -> Clear store(!)\n<any> -> Print store\n");
     #endif
     STORAGE_clear();
     lcd.clear();
@@ -305,7 +327,7 @@ void read_keys() {
 
 
 void loop(){
-  long now = millis();
+  ulong now = millis();
 
   // SHORT loop
   //
@@ -320,7 +342,7 @@ void loop(){
   //
   if (now - longLoopMillis > LONG_LOOP_MSEC) {
     longLoopMillis = now;
-    #ifdef D_LONG_LOOP
+    #ifdef LOG_LONG_LOOP
        Serial << F("Long loop: REC=") << is_recording << endl; 
     #endif
     if (is_recording) {
@@ -338,8 +360,8 @@ void update_leds(float CPM) {
   //led var setting
   int i = 0;
   for(int i=0; i < NLEDS; i++) {
-    const int state = (CPM > LED_THRESH[i])? HIGH: LOW;
-    digitalWrite(LED_ARRAY[i], state);
+    const int state = (CPM > LED_BAR_THRESH[i])? HIGH: LOW;
+    digitalWrite(LED_BAR_PINS[i], state);
   }
 }
 
@@ -349,7 +371,7 @@ void update_leds(float CPM) {
  */
 void INT_countPulseclicks(){
   detachInterrupt(0);
-  long now = millis();
+  ulong now = millis();
   
   clicks++;
   
