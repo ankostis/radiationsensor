@@ -339,7 +339,7 @@ void update_stats(int send_serial) {
     lcd.setCursor(9, 0);
     lcd << "Rec=";
     if (is_recording)
-      lcd << EDISC_nrecs_saved;
+      lcd << int(EEPROM.length() / sizeof(Rec))- EDISC_nrecs_saved;
     else
       lcd << F("_");
     lcd.setCursor(0, 1);
