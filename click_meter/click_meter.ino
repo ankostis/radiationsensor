@@ -68,6 +68,8 @@ const float SIEVERT_CONV_FACTOR = 0.00812;
 ulong lastStatsMs               = 0;
 ulong lastEdiskMs               = 0;
 bool is_recording               = false;
+uint rec_clicks                 = 0;
+uint rec_maxCPM                 = 0;
 
 volatile uint clicks            = 0;
 volatile int maxCPM             = 0.0;
@@ -215,8 +217,8 @@ void EDISK_append_rec() {
     int eix = EDISK_nextIx;
 
     Rec rec;
-    rec.clicks = clicks;
-    rec.maxCPM = maxCPM;
+    rec.clicks = rec_clicks;
+    rec.maxCPM = rec_maxCPM;
     _Rec_seal(rec, rtc.now());
     
     #ifdef LOG_NEW_REC
@@ -315,12 +317,13 @@ void setup(){
   send_rtc();
   Serial << endl;
 
+  ulong now = millis();
   #ifdef LOG_BOOT_CONFIG
     send_config();
-    send_state(millis());
+    send_state(now);
   #endif
   Serial << F("CLICKS, MaxCPM" STR(NCLICK_TIMES)) << endl;
-  update_stats(0);
+  update_stats(0, now);
 
   lastStatsMs = lastEdiskMs = millis();
   attachInterrupt(0,INT_countPulseclicks,FALLING);
@@ -328,22 +331,24 @@ void setup(){
 
 
 
-void update_stats(int send_serial) {
+void update_stats(int send_serial, ulong now) {
     if (send_serial) {
-      Serial << clicks << ',' << maxCPM << endl;
+      Serial << clicks << F(",") << maxCPM << endl;
     }
     
     lcd.clear();    
 
-    lcd << "C10S=" << clicks;
+    lcd << F("C10S=") << clicks;
     lcd.setCursor(9, 0);
-    lcd << "Rec=";
+    lcd << F("Rec=");
     if (is_recording)
-      lcd << int(EEPROM.length() / sizeof(Rec))- EDISC_nrecs_saved;
+      lcd << int(EEPROM.length() / sizeof(Rec)) - EDISC_nrecs_saved;
     else
       lcd << F("_");
     lcd.setCursor(0, 1);
-    lcd << "CPM" STR(NCLICK_TIMES) "=" << maxCPM;
+    lcd << F("CPM" STR(NCLICK_TIMES) "=") << maxCPM;
+    lcd.setCursor(9, 1);
+    lcd << F("T=") << (EDISK_DELAY_MSEC - now + lastEdiskMs) / 1000;
 }
 
 
@@ -429,7 +434,10 @@ void loop(){
   //
   if (now - lastStatsMs > STATS_DELAY_MSEC) {
     lastStatsMs = now;
-    update_stats(1);
+    update_stats(1, now);
+    rec_clicks += clicks;
+    if (maxCPM > rec_maxCPM) 
+      rec_maxCPM = maxCPM;
     clicks = maxCPM = 0;
   } // short loop
 
@@ -444,6 +452,7 @@ void loop(){
     if (is_recording) {
       EDISK_append_rec();
     }
+    rec_clicks = rec_maxCPM = 0;
   } // long loop
 }
 
