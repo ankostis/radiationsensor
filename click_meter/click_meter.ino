@@ -44,6 +44,7 @@
 
 #define STATS_DELAY_SEC         10L   // Short, to detect "max" CPMs & update LCD.
 #define EDISK_DELAY_SEC         1500L // Longer, 600-->10min: ~1 day fits in edisk(EEPROM).
+#define ZIPPED_TIME_STEP_SEC    120   // Time resolution for `Rec.timestamp`.
 
 /** 
  * The buffer of click timestamps is used 
@@ -59,6 +60,7 @@ const int   LED_BAR_PINS []     = {10,11,12,13,9};
 const int   NLEDS               = ARRAYLEN(LED_BAR_PINS);
 const int   GEIGER_PIN          = 2;
 #define     LCD_PINS            3,4,5,6,7,8   // Libellium LCD pin numbers.
+
 /** J305βγ Conversion factor [CPM to uSV/h] - unused, for my reference. */
 const float SIEVERT_CONV_FACTOR = 0.00812;
 //
@@ -88,31 +90,7 @@ int EDISC_nrecs_saved           = 0;
 const ulong  STATS_DELAY_MSEC   = STATS_DELAY_SEC * 1000L;
 const ulong  EDISK_DELAY_MSEC   = EDISK_DELAY_SEC * 1000L;
 
-/**
- * Compress timestamps by storing them as 10-min offsets 
- * from 11-Sep-2016 (MYEPOCH).
- * So int (2^16) timestamps would work in the future for:
- * - 65536 / 6            ~= 10923 hours
- * - 65536 / 6 / 24       ~= 455 days
- * 
- * Remember to update MYEPOCH and recompile it next-year :-(
- */
- // MYEPOCH(2016/09/11) expressed from EPOCH(1970/1/1):
-const DateTime MYEPOCH(2016, 9, 11);
-const ulong MYEPOCH_sec = MYEPOCH.unixtime();
-
-
-uint _compress_time(ulong sec) {
-  //Serial << "TCOMP: " << sec << ", " << MYEPOCH_sec << ", " <<  ((sec - MYEPOCH_sec) /60/10) << endl;
-  return (sec - MYEPOCH_sec) / EDISK_DELAY_SEC; 
-}
-
-ulong _decompress_time(uint tenmins) {
-  return MYEPOCH_sec + tenmins * EDISK_DELAY_SEC; //!!! changing delay, back-dates recordings!!!
-} 
-
-
-
+ZippedTime tzipper(ZIPPED_TIME_STEP_SEC);
 LiquidCrystal lcd(LCD_PINS);
 RTC_DS1307 rtc;
 
@@ -120,7 +98,7 @@ RTC_DS1307 rtc;
 
 bool send_rec(Rec &rec) {
   if (Rec_is_valid(rec))
-    Serial << _decompress_time(rec.tmstmp) << F(", ") << rec.clicks << F(", ") << rec.maxCPM << endl;
+    Serial << tzipper.unzip(rec.tmstmp) << F(", ") << rec.clicks << F(", ") << rec.maxCPM << endl;
   return true;
 }
 
@@ -145,60 +123,6 @@ void send_rtc() {
     Serial << now.year() << '/' << now.month() << '/' << now.day();
     Serial << F("-") << now.hour() << ':' << now.minute() << ':' << now.second() << ',';  
   }
-}
-
-
-void setup(){
-  pinMode(GEIGER_PIN, INPUT);
-  digitalWrite(GEIGER_PIN,HIGH);
-  for (int i = 0; i < NLEDS; i++){
-    pinMode(LED_BAR_PINS[i],OUTPUT);
-  }
-  
-  
-  Serial.begin(19200);
-  
-  //set up the LCD\'s number of columns and rows:
-  lcd.begin(16, 2);
-  lcd.clear();
-  //lcd.setCursor(0, 0);
-  lcd << F("Radiation Sensor");
-  delay(700);
-  for (int i=0;i<10;i++){
-    delay(100);  
-    lcd.scrollDisplayLeft();
-  }
-
-  // Flip REC on boot, to allow to control it.
-  is_recording = EDISK_rec_flip(is_recording);
-
-  lcd.clear();
-  lcd <<  __DATE__ ;  
-  lcd.setCursor(0,1);
-  lcd << __TIME__;
-  delay(1700);
-
-  // Re-flip REC to remain the same, unless reset.
-  is_recording = EDISK_rec_flip(is_recording);
-  EDISK_nextIx = EDISK_traverse(0);
-
-  Serial << F("PROG: " __DATE__ ", " __TIME__) << endl;
-  init_RTC();
-  
-  Serial << F("RTC: ");
-  send_rtc();
-  Serial << endl;
-
-  ulong now = millis();
-  #ifdef LOG_BOOT_CONFIG
-    send_config();
-    send_state(now);
-  #endif
-  Serial << F("CLICKS, MaxCPM" STR(NCLICK_TIMES)) << endl;
-  update_stats(0, now);
-
-  lastStatsMs = lastEdiskMs = millis();
-  attachInterrupt(0,INT_countPulseClicks,FALLING);
 }
 
 
@@ -295,6 +219,62 @@ void read_keys(ulong now) {
     lcd << F("Try h: Help");
   }
 }
+
+
+void setup(){
+  pinMode(GEIGER_PIN, INPUT);
+  digitalWrite(GEIGER_PIN,HIGH);
+  for (int i = 0; i < NLEDS; i++){
+    pinMode(LED_BAR_PINS[i],OUTPUT);
+  }
+  
+  
+  Serial.begin(19200);
+  
+  //set up the LCD\'s number of columns and rows:
+  lcd.begin(16, 2);
+  lcd.clear();
+  //lcd.setCursor(0, 0);
+  lcd << F("Radiation Sensor");
+  delay(700);
+  for (int i=0;i<10;i++){
+    delay(100);  
+    lcd.scrollDisplayLeft();
+  }
+
+  // Flip REC on boot, to allow to control it.
+  is_recording = EDISK_rec_flip(is_recording);
+
+  lcd.clear();
+  lcd <<  __DATE__ ;  
+  lcd.setCursor(0,1);
+  lcd << __TIME__;
+  delay(1700);
+
+  // Re-flip REC to remain the same, unless reset.
+  is_recording = EDISK_rec_flip(is_recording);
+  EDISK_nextIx = EDISK_traverse(0);
+
+  Serial << F("PROG: " __DATE__ ", " __TIME__) << endl;
+  init_RTC();
+  
+  Serial << F("RTC: ");
+  send_rtc();
+  Serial << endl;
+
+  ulong now = millis();
+  #ifdef LOG_BOOT_CONFIG
+    send_config();
+    send_state(now);
+  #endif
+  Serial << F("CLICKS, MaxCPM" STR(NCLICK_TIMES)) << endl;
+  update_stats(0, now);
+
+  lastStatsMs = lastEdiskMs = millis();
+  attachInterrupt(0,INT_countPulseClicks,FALLING);
+}
+
+
 
 
 void loop(){

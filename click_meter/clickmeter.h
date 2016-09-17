@@ -35,18 +35,42 @@ const int INT_MAX = 2147483647;
  *      146 / 6 / 24  = 1.014 days
  *  Assuming 10min timestamps, a whole day fits in!
  */ 
-typedef struct _Rec {
-  uint tmstmp;
-  uint clicks;
-  uint maxCPM;
+typedef struct {
+  ulong tmstmp :20;
+  uint clicks: 14;
+  uint maxCPM: 14;
   byte crc;
 } Rec;
 
+/**
+ * Compress timestamps by storing them as X-min offsets  from 11-Sep-2016 (MYEPOCH).
+ * 
+ * For instance, assuming (2^20) timestamps of each Rec, then  
+ * a 2-min steps can represent can represent:
+ *   - 2^20                   =  1,048,576    max timestamp
+ *   - 2^20 * 120             = 62,914,560    sec
+ *   - 2^20 * 120/3600        ~=    34,952.33 hours
+ *   - 2^20 * 120/8640        ~=     1,456.35 days
+ *   - 2^20 * 120/86400/365   ~=         4    years
+ * 
+ * Recompile to update MYEPOCH after 4 years :-(
+ */
+class ZippedTime {
+ // MYEPOCH(2016/09/11) expressed from EPOCH(1970/1/1):
+  const ulong MYEPOCH_sec = DateTime(2016, 9, 11).unixtime();
+  uint time_step_sec; // WARN!!! changing delay, back-dates recordings!!!
+
+  public: 
+    ZippedTime(uint tsteps);  
+    uint zip(ulong sec);
+    ulong unzip(uint ztime);
+};
+
+
 extern LiquidCrystal lcd;
 extern RTC_DS1307 rtc;
+extern ZippedTime tzipper;
 extern int EDISK_nextIx, EDISC_nrecs_saved;
-
-uint _compress_time(ulong sec);
 
 bool Rec_is_valid(Rec &rec);
 int EDISK_traverse(const int start_ix = INT_MAX, bool (*recHandler_func)(Rec&) = NULL);
@@ -54,17 +78,10 @@ int EDISK_rec_flip(int is_recording);
 void EDISK_append_rec(uint clicks, uint maxCPM);
 void EDISK_clear();
 
-void send_state(ulong now);
-
 #define ARRAYLEN(x) sizeof((x)) / sizeof((x)[0])
 // Trick from http://stackoverflow.com/questions/5459868/c-preprocessor-concatenate-int-to-string
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
-
-// GLOBALS
-//int EDISK_nextIx = 0;   // Index in EEPROM to write next rec (avoid scan every time).
-//int EDISC_nrecs_saved = 0;
-
 
 
 #endif //RADIATION

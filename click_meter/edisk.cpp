@@ -23,6 +23,19 @@
 
 #include "clickmeter.h"
 
+ZippedTime::ZippedTime(uint time_step_sec) {
+  this->time_step_sec = time_step_sec;
+}
+
+uint ZippedTime::zip(ulong sec) {
+  //Serial << "TCOMP: " << sec << ", " << MYEPOCH_sec << ", " <<  ((sec - MYEPOCH_sec) /60/10) << endl;
+  return (sec - this->MYEPOCH_sec) / this->time_step_sec; 
+}
+
+ulong ZippedTime::unzip(uint ztime) {
+  return this->MYEPOCH_sec + ztime * this->time_step_sec;
+} 
+
 
 
 /** From: http://www.leonardomiliani.com/en/2013/un-semplice-crc8-per-arduino/
@@ -49,7 +62,7 @@ byte _Rec_crc(const Rec &rec) {
 
 
 void _Rec_seal(Rec &rec, const DateTime rnow) {
-    rec.tmstmp = _compress_time(rnow.unixtime());
+    rec.tmstmp = tzipper.zip(rnow.unixtime());
     rec.crc = _Rec_crc(rec);
 }
 
