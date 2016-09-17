@@ -87,12 +87,12 @@ int EDISC_nrecs_saved           = 0;
 //////////////////////////////////
 
 
-const ulong  STATS_DELAY_MSEC   = STATS_DELAY_SEC * 1000L;
-const ulong  EDISK_DELAY_MSEC   = EDISK_DELAY_SEC * 1000L;
+const ulong  STATS_DELAY_MSEC   = 1000L * STATS_DELAY_SEC;
+const ulong  EDISK_DELAY_MSEC   = 1000L * EDISK_DELAY_SEC;
 
-ZippedTime tzipper(ZIPPED_TIME_STEP_SEC);
+const ZippedTime tzipper(ZIPPED_TIME_STEP_SEC);
 LiquidCrystal lcd(LCD_PINS);
-RTC_DS1307 rtc;
+const RTC_DS1307 rtc;
 
 
 
@@ -143,8 +143,10 @@ void update_stats(int send_serial, ulong now) {
       lcd << F("_");
     lcd.setCursor(0, 1);
     lcd << F("CPM" STR(NCLICK_TIMES) "=") << maxCPM;
-    lcd.setCursor(9, 1);
-    lcd << F("T=") << (EDISK_DELAY_MSEC - now + lastEdiskMs) / 1000;
+    if (is_recording) {
+      lcd.setCursor(9, 1);
+      lcd << F("T=") << (EDISK_DELAY_MSEC - now + lastEdiskMs) / 1000;
+    }
 }
 
 

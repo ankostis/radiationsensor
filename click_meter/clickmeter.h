@@ -67,9 +67,9 @@ class ZippedTime {
 };
 
 
-extern LiquidCrystal lcd;
-extern RTC_DS1307 rtc;
-extern ZippedTime tzipper;
+extern const ZippedTime tzipper;
+extern const RTC_DS1307 rtc;
+extern LiquidCrystal lcd;  // Cannot const due to `<<` operator.
 extern int EDISK_nextIx, EDISC_nrecs_saved;
 
 bool Rec_is_valid(Rec &rec);
