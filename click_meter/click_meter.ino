@@ -53,16 +53,15 @@
 /** Threshold `maxCPM` values for the led bar (len==NLEDS). */
 const int LED_BAR_THRESH[]      = {30, 70, 150, 350, 800};
 //
-//////////////////////////////////
-
-
+//////////// HARDWARE ////////////
+//
 const int   LED_BAR_PINS []     = {10,11,12,13,9};
 const int   NLEDS               = ARRAYLEN(LED_BAR_PINS);
 const int   GEIGER_PIN          = 2;
+#define     LCD_PINS            3,4,5,6,7,8   // Libellium LCD pin numbers.
 /** J305βγ Conversion factor [CPM to uSV/h] - unused, for my reference. */
 const float SIEVERT_CONV_FACTOR = 0.00812;
-
-
+//
 //////////// GLOBALS /////////////
 //
 ulong lastStatsMs               = 0;
@@ -80,7 +79,7 @@ volatile int maxCPM             = 0.0;
 ulong clickTimesBuffer[NCLICK_TIMES] = {0};
 int nextClickIx = 0;
 
-int EDISK_nextIx                = -1;   // Index in EEPROM to write next rec (avoid scan every time).
+int EDISK_nextIx                = -1;   // Index in EEPROM to write next rec (scanned on boot).
 int EDISC_nrecs_saved           = 0;
 //
 //////////////////////////////////
@@ -93,13 +92,12 @@ const ulong  EDISK_DELAY_MSEC   = EDISK_DELAY_SEC * 1000L;
  * Compress timestamps by storing them as 10-min offsets 
  * from 11-Sep-2016 (MYEPOCH).
  * So int (2^16) timestamps would work in the future for:
- * - 65536 * 6            = 393216 hours
- * - 65536 * 6 / 24       = 16384 days
- * - 65536 * 6 / 24 / 365 = ~44.8 years
+ * - 65536 / 6            ~= 10923 hours
+ * - 65536 / 6 / 24       ~= 455 days
  * 
- * That's enough for a humble arduino :-)
+ * Remember to update MYEPOCH and recompile it next-year :-(
  */
- // MYEPOCH expressed from EPOCH(1970/1/1)
+ // MYEPOCH(2016/09/11) expressed from EPOCH(1970/1/1):
 const DateTime MYEPOCH(2016, 9, 11);
 const ulong MYEPOCH_sec = MYEPOCH.unixtime();
 
@@ -110,144 +108,18 @@ uint _compress_time(ulong sec) {
 }
 
 ulong _decompress_time(uint tenmins) {
-  return MYEPOCH_sec + tenmins * EDISK_DELAY_SEC; 
-}
-
-
-/** From: http://www.leonardomiliani.com/en/2013/un-semplice-crc8-per-arduino/
- */
-byte _crc8(const byte *data, byte len) {
-  byte crc = 0x00;
-  while (len--) {
-    byte extract = *data++;
-    for (byte tempI = 8; tempI; tempI--) {
-      byte sum = (crc ^ extract) & 0x01;
-      crc >>= 1;
-      if (sum) {
-        crc ^= 0x8C;
-      }
-      extract >>= 1;
-    }
-  }
-  return crc;
-}
-
-byte _Rec_crc(const Rec &rec) {
-  return _crc8((byte *)&rec, sizeof(Rec) - 1);
-}
-
-
-void _Rec_seal(Rec &rec, const DateTime rnow) {
-    rec.tmstmp = _compress_time(rnow.unixtime());
-    rec.crc = _Rec_crc(rec);
-}
-
-
-bool _Rec_is_valid(Rec &rec) {
-  int crc = _Rec_crc(rec);
-    #ifdef LOG_REC_VISIT
-      Serial << F("  calced_crc=") << crc << endl;
-    #endif  
-  return bool(rec.crc == crc);
-}
+  return MYEPOCH_sec + tenmins * EDISK_DELAY_SEC; //!!! changing delay, back-dates recordings!!!
+} 
 
 
 
-
-// Libellium LCD pin numbers.
-LiquidCrystal lcd(3,4,5,6,7,8);
+LiquidCrystal lcd(LCD_PINS);
 RTC_DS1307 rtc;
 
 
 
-
-const int EDSIK_is_rec_eix = EEPROM.length() - 1;
-
-void EDISK_rec_flip() {
-  is_recording = 1 ^ EEPROM.read(EDSIK_is_rec_eix);
-  EEPROM.write(EDSIK_is_rec_eix, is_recording); 
-}
-
-int _EDISK_next_eix(int eix) {
-    eix += sizeof(Rec);
-    if (eix >= EEPROM.length())
-      eix = 0;
-    return eix;
-}
-
-/**
- * Loops around all EDISK-recs untill and invalid CRC met or reach start point.
- * 
- * :param start_ix:         index into eeprom to start traversing from, 0-->EEPROM.length()-1
- * :param recHandler_func:  a function receiving each rec and return `false` to break traversal.
- * :return:                 the index of the 1st invalid rec met
- */
-int EDISK_traverse(const int start_ix = INT_MAX, bool (*recHandler_func)(Rec&) = NULL) {
-  
-  int eix = (start_ix < 0 || start_ix >= EEPROM.length())? EDISK_nextIx : start_ix;
-
-  if (!recHandler_func)
-    recHandler_func = _Rec_is_valid;
-    
-  Rec rec;
-  do {
-    EEPROM.get(eix, rec);
-    #ifdef LOG_REC_VISIT
-      Serial << F("EDISK: visit_eix=") << eix << F(", r.crc=") << rec.crc << endl;
-    #endif
-    
-    if (!recHandler_func(rec))
-      return eix;
-    
-    eix = _EDISK_next_eix(eix);
-  } while (eix != start_ix);
-
-  // Reaching here means all Recs were valid:
-  //  --> either BAD EDISK 
-  //  --> or BAD algo/handler.
-  #ifdef LOG_REC_VISIT
-    Serial << F("EDISK: Looped around eix: ") << eix << endl;
-  #endif  
-
-  return eix; // Signal error.
-}
-
-
-void EDISK_append_rec() {
-    int eix = EDISK_nextIx;
-
-    Rec rec;
-    rec.clicks = rec_clicks;
-    rec.maxCPM = rec_maxCPM;
-    _Rec_seal(rec, rtc.now());
-    
-    #ifdef LOG_NEW_REC
-      Serial << F("EDISK append_eix: ") << eix;
-      Serial << F(",tmstmp=") << rec.tmstmp << F(",clicks=") << rec.clicks << F(",maxCPM=") << rec.maxCPM ;
-      Serial << F(",CRC=") << rec.crc << endl;
-    #endif
-    
-    #ifndef REC_DISABLED
-      EEPROM.put(eix, rec);  
-    #endif
-    
-    EDISK_nextIx = _EDISK_next_eix(eix);
-    
-    #ifndef REC_DISABLED
-      EEPROM.write(EDISK_nextIx, 0); // Probably breaks next CRC...
-    #endif
-    EDISC_nrecs_saved++;
-}
-
-
-void EDISK_clear() {
-  EEPROM.write(0, 0); // Probably breaks CRC...
-  EDISK_nextIx = 0;
-
-}
-
 bool send_rec(Rec &rec) {
-  if (_Rec_is_valid(rec))
+  if (Rec_is_valid(rec))
     Serial << _decompress_time(rec.tmstmp) << F(", ") << rec.clicks << F(", ") << rec.maxCPM << endl;
   return true;
 }
@@ -298,7 +170,7 @@ void setup(){
   }
 
   // Flip REC on boot, to allow to control it.
-  EDISK_rec_flip();
+  is_recording = EDISK_rec_flip(is_recording);
 
   lcd.clear();
   lcd <<  __DATE__ ;  
@@ -307,7 +179,7 @@ void setup(){
   delay(1700);
 
   // Re-flip REC to remain the same, unless reset.
-  EDISK_rec_flip();
+  is_recording = EDISK_rec_flip(is_recording);
   EDISK_nextIx = EDISK_traverse(0);
 
   Serial << F("PROG: " __DATE__ ", " __TIME__) << endl;
@@ -326,7 +198,7 @@ void setup(){
   update_stats(0, now);
 
   lastStatsMs = lastEdiskMs = millis();
-  attachInterrupt(0,INT_countPulseclicks,FALLING);
+  attachInterrupt(0,INT_countPulseClicks,FALLING);
 }
 
 
@@ -380,7 +252,7 @@ void send_state(ulong now) {
 void read_keys(ulong now) {
   char inp = Serial.read();
   if (inp == 'R') {
-    EDISK_rec_flip();
+    is_recording = EDISK_rec_flip(is_recording);
     #ifdef LOG_ACTIONS
       Serial << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
     #endif
@@ -450,7 +322,7 @@ void loop(){
        Serial << F("Long loop: REC=") << is_recording << endl; 
     #endif
     if (is_recording) {
-      EDISK_append_rec();
+      EDISK_append_rec(rec_clicks, rec_maxCPM);
     }
     rec_clicks = rec_maxCPM = 0;
   } // long loop
@@ -471,7 +343,7 @@ void update_leds(int CPM) {
 /**
  * Interupt geiger routine.
  */
-void INT_countPulseclicks(){
+void INT_countPulseClicks(){
   detachInterrupt(0);
   ulong now = millis();
   
@@ -490,6 +362,6 @@ void INT_countPulseclicks(){
     maxCPM = CPM;
   
   while(digitalRead(2)==0);
-  attachInterrupt(0,INT_countPulseclicks,FALLING);
+  attachInterrupt(0,INT_countPulseClicks,FALLING);
 }
 

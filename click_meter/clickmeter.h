@@ -21,6 +21,9 @@
 #ifndef RADIATION
 #define RADIATION
 
+#include <RTClib.h>
+#include <LiquidCrystal.h>
+
 typedef unsigned int  uint;
 typedef unsigned long ulong;
 const int INT_MAX = 2147483647;
@@ -39,13 +42,30 @@ typedef struct _Rec {
   byte crc;
 } Rec;
 
-int STORAGE_traverse(int start_ix = INT_MAX, bool (*printout)(Rec&) = NULL);
+extern LiquidCrystal lcd;
+extern RTC_DS1307 rtc;
+extern int EDISK_nextIx, EDISC_nrecs_saved;
+
+uint _compress_time(ulong sec);
+
+bool Rec_is_valid(Rec &rec);
+int EDISK_traverse(const int start_ix = INT_MAX, bool (*recHandler_func)(Rec&) = NULL);
+int EDISK_rec_flip(int is_recording);
+void EDISK_append_rec(uint clicks, uint maxCPM);
+void EDISK_clear();
+
 void send_state(ulong now);
 
 #define ARRAYLEN(x) sizeof((x)) / sizeof((x)[0])
 // Trick from http://stackoverflow.com/questions/5459868/c-preprocessor-concatenate-int-to-string
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
+
+// GLOBALS
+//int EDISK_nextIx = 0;   // Index in EEPROM to write next rec (avoid scan every time).
+//int EDISC_nrecs_saved = 0;
+
+
 
 #endif //RADIATION
 
