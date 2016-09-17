@@ -237,7 +237,7 @@ void setup(){
   lcd.begin(16, 2);
   lcd.clear();
   //lcd.setCursor(0, 0);
-  lcd << F("Radiation Sensor");
+  lcd << F("https://github.com/ankostis/radiationsensor");
   delay(700);
   for (int i=0;i<10;i++){
     delay(100);  
