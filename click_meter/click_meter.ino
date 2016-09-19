@@ -98,7 +98,7 @@ const RTC_DS1307 rtc;
 
 bool send_rec(Rec &rec) {
   if (Rec_is_valid(rec))
-    Serial << tzipper.unzip(rec.tmstmp) << F(", ") << rec.clicks << F(", ") << rec.maxCPM << endl;
+    Serial << tzipper.unzip(rec.tmstmp) << F(",") << rec.clicks << F(",") << rec.maxCPM << endl;
   return true;
 }
 
@@ -120,8 +120,8 @@ void send_rtc() {
   if (rtc.isrunning()) {
     DateTime now = rtc.now();
     
-    Serial << now.year() << '/' << now.month() << '/' << now.day();
-    Serial << F("-") << now.hour() << ':' << now.minute() << ':' << now.second() << ',';  
+    Serial << now.year() << F("/") << now.month() << F("/") << now.day();
+    Serial << F("-") << now.hour() << F(":") << now.minute() << F(":") << now.second() << F(",");  
   }
 }
 
@@ -129,7 +129,8 @@ void send_rtc() {
 
 void update_stats(int send_serial, ulong now) {
     if (send_serial) {
-      Serial << clicks << F(",") << maxCPM << endl;
+      const DateTime rnow = rtc.now();
+      Serial << rnow.unixtime() << F(",") << clicks << F(",") << maxCPM << endl;
     }
     
     lcd.clear();    
@@ -239,10 +240,11 @@ void setup(){
   //lcd.setCursor(0, 0);
   lcd << F("https://github.com/ankostis/radiationsensor");
   delay(700);
-  for (int i=0;i<10;i++){
+  for (int i = 0; i < 27; i++){
     delay(100);  
     lcd.scrollDisplayLeft();
   }
+  delay(700);
 
   // Flip REC on boot, to allow to control it.
   is_recording = EDISK_rec_flip(is_recording);

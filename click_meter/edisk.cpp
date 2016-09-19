@@ -151,7 +151,7 @@ void EDISK_append_rec(uint clicks, uint maxCPM) {
     EDISK_nextIx = _EDISK_next_eix(eix);
     
     #ifndef REC_DISABLED
-      EEPROM.write(EDISK_nextIx, 0); // Probably breaks next CRC...
+      EEPROM.write(EDISK_nextIx, 1 ^ EEPROM.read(EDISK_nextIx)); // Break next CRC.
     #endif
     EDISC_nrecs_saved++;
 }
