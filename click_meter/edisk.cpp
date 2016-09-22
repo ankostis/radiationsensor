@@ -28,7 +28,7 @@ ZippedTime::ZippedTime(uint time_step_sec) {
 }
 
 uint ZippedTime::zip(ulong sec) {
-  //Serial << "TCOMP: " << sec << ", " << MYEPOCH_sec << ", " <<  ((sec - MYEPOCH_sec) /60/10) << endl;
+  //Serial << F("# TCOMP: ") << sec << F(",") << MYEPOCH_sec << F(",") <<  ((sec - MYEPOCH_sec) /60/10) << endl;
   return (sec - this->MYEPOCH_sec) / this->time_step_sec; 
 }
 
@@ -110,7 +110,7 @@ int EDISK_traverse(const int start_ix = INT_MAX, bool (*recHandler_func)(Rec&) =
   do {
     EEPROM.get(eix, rec);
     #ifdef LOG_REC_VISIT
-      Serial << F("EDISK: visit_eix=") << eix << F(", r.crc=") << rec.crc << endl;
+      Serial << F("# EDISK: visit_eix=") << eix << F(", r.crc=") << rec.crc << endl;
     #endif
     
     if (!recHandler_func(rec))
@@ -123,7 +123,7 @@ int EDISK_traverse(const int start_ix = INT_MAX, bool (*recHandler_func)(Rec&) =
   //  --> either BAD EDISK 
   //  --> or BAD algo/handler.
   #ifdef LOG_REC_VISIT
-    Serial << F("EDISK: Looped around eix: ") << eix << endl;
+    Serial << F("# EDISK: Looped around eix: ") << eix << endl;
   #endif  
 
   return eix; // Signal error.
@@ -139,7 +139,7 @@ void EDISK_append_rec(uint clicks, uint maxCPM) {
     _Rec_seal(rec, rtc.now());
     
     #ifdef LOG_NEW_REC
-      Serial << F("EDISK append_eix: ") << eix;
+      Serial << F("# EDISK append_eix: ") << eix;
       Serial << F(",tmstmp=") << rec.tmstmp << F(",clicks=") << rec.clicks << F(",maxCPM=") << rec.maxCPM ;
       Serial << F(",CRC=") << rec.crc << endl;
     #endif

@@ -35,9 +35,9 @@
 #ifdef DEBUG_LOG
   #define LOG_ACTIONS           // Serial-log commands send over serial (good).
   #define LOG_BOOT_CONFIG       // Serial-log config vars on reset.
-//  #define LOG_REC_VISIT         // Serial-log each rec traversed (much stuff).
+  //#define LOG_REC_VISIT         // Serial-log each rec traversed (much stuff).
   #define LOG_NEW_REC           // Serial-log values of each new rec.
-  #define LOG_EDISK_INTERVAL    // Serial-log entrance to long-loop.
+  //#define LOG_EDISK_INTERVAL    // Serial-log entrance to long-loop (breaks csv).
 #endif
 
 //#define REC_DISABLED          // Do not actually write EEPROM (norrmaly off).
@@ -98,7 +98,7 @@ const RTC_DS1307 rtc;
 
 bool send_rec(Rec &rec) {
   if (Rec_is_valid(rec))
-    Serial << tzipper.unzip(rec.tmstmp) << F(",") << rec.clicks << F(",") << rec.maxCPM << endl;
+    Serial << F("# ") << tzipper.unzip(rec.tmstmp) << F(",") << rec.clicks << F(",") << rec.maxCPM << endl;
   return true;
 }
 
@@ -106,10 +106,10 @@ bool send_rec(Rec &rec) {
 
 void init_RTC() {
   if (! rtc.begin()) {
-      Serial << F("Couldn't find RTC") << endl;
+      Serial << F("# ") << F("Couldn't find RTC") << endl;
   } else {
     if (! rtc.isrunning()) {
-      Serial << F("Initializing RTC time!") << endl;
+      Serial << F("# Initializing RTC time!") << endl;
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
       // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
     }
@@ -152,7 +152,7 @@ void update_stats(int send_serial, ulong now) {
 
 
 void send_config() {
-  Serial << F("StatsDelayMs=") << STATS_DELAY_MSEC << ",";
+  Serial << F("# StatsDelayMs=") << STATS_DELAY_MSEC << ",";
   Serial << F("EdiskDelayMs=") << EDISK_DELAY_MSEC << ",";
   Serial << F("NClickTimes=") << NCLICK_TIMES << ",";
   Serial << F("LedsThresh=[");
@@ -162,7 +162,7 @@ void send_config() {
 }
 
 void send_state(ulong now) {
-  Serial << F("StatsETA=") << (STATS_DELAY_MSEC - now + lastStatsMs) << F(",");
+  Serial << F("# StatsETA=") << (STATS_DELAY_MSEC - now + lastStatsMs) << F(",");
   Serial << F("EdiskETA=") << (EDISK_DELAY_MSEC - now + lastEdiskMs) << F(",");
   Serial << F("isRec=") << is_recording << F(",");
   Serial << F("clicks=") << clicks << F(",");
@@ -181,7 +181,7 @@ void read_keys(ulong now) {
   if (inp == 'R') {
     is_recording = EDISK_rec_flip(is_recording);
     #ifdef LOG_ACTIONS
-      Serial << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
+      Serial << F("# REC ") << (is_recording? F("STARTED...") : F("STOPPED.")) << endl;
     #endif
     lcd.clear();
     lcd << F("REC ") << (is_recording? F("STARTED...") : F("STOPPED."));
@@ -189,7 +189,7 @@ void read_keys(ulong now) {
   
   } else if (inp == 'C') {
     #ifdef LOG_ACTIONS
-      Serial << F("Clearing EDISK!") << endl;
+      Serial << F("# Clearing EDISK!") << endl;
     #endif
     EDISK_clear();
     lcd.clear();
@@ -203,11 +203,11 @@ void read_keys(ulong now) {
   } else if ( (inp | 1<<5) == 'p') {
     // prints EDISK to serial.
     
-    Serial << F("Recorded data::\ntime,clicks,maxCPM") << endl;
+    Serial << F("# Recorded data::\ntime,clicks,maxCPM") << endl;
     EDISK_traverse(EDISK_nextIx, send_rec);
     
   } else if ( (inp | 1<<5) == 'h') {
-    Serial << F("R - > Record on/off!\nC -> Clear store(!)\ns -> log Status\n<p> -> Play recording\n");
+    Serial << F("# R - > Record on/off!\nC -> Clear store(!)\ns -> log Status\n<p> -> Play recording\n");
     EDISK_clear();
     lcd.clear();
     lcd << F("R:rec1/0 C:clear");
@@ -216,7 +216,7 @@ void read_keys(ulong now) {
 
   } else if (inp > 0) {
     #ifdef LOG_ACTIONS
-      Serial << F("Invalid key! try <h> for help\n");
+      Serial << F("# Invalid key! try <h> for help\n");
     #endif
     lcd.clear();
     lcd << F("Try h: Help");
@@ -259,10 +259,10 @@ void setup(){
   is_recording = EDISK_rec_flip(is_recording);
   EDISK_nextIx = EDISK_traverse(0);
 
-  Serial << F("PROG: " __DATE__ ", " __TIME__) << endl;
+  Serial << F("# PROG: " __DATE__ ", " __TIME__) << endl;
   init_RTC();
   
-  Serial << F("RTC: ");
+  Serial << F("# RTC: ");
   send_rtc();
   Serial << endl;
 
@@ -303,7 +303,7 @@ void loop(){
   if (now - lastEdiskMs > EDISK_DELAY_MSEC) {
     lastEdiskMs = now;
     #ifdef LOG_EDISK_INTERVAL
-       Serial << F("Long loop: REC=") << is_recording << endl; 
+       Serial << F("# Long loop: REC=") << is_recording << endl; 
     #endif
     if (is_recording) {
       EDISK_append_rec(rec_clicks, rec_maxCPM);
