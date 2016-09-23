@@ -98,7 +98,7 @@ const RTC_DS1307 rtc;
 
 bool send_rec(Rec &rec) {
   if (Rec_is_valid(rec))
-    Serial << F("# ") << tzipper.unzip(rec.tmstmp) << F(",") << rec.clicks << F(",") << rec.maxCPM << endl;
+    Serial << tzipper.unzip(rec.tmstmp) << F(",") << rec.clicks << F(",") << rec.maxCPM << endl;
   return true;
 }
 
@@ -168,7 +168,7 @@ void send_state(ulong now) {
   Serial << F("clicks=") << clicks << F(",");
   Serial << F("maxCPM=") << maxCPM << F(",");
   Serial << F("EDISK_nextIx=") << EDISK_nextIx << F(",");
-  Serial << F("\n  clickTimes=[");
+  Serial << F("\n#   clickTimes=[");
   for (int i = 0; i < NCLICK_TIMES; i++)
     Serial << (now - clickTimesBuffer[i]) << F(",");
   Serial << F("]\n");
@@ -206,8 +206,8 @@ void read_keys(ulong now) {
     Serial << F("# Recorded data::\ntime,clicks,maxCPM") << endl;
     EDISK_traverse(EDISK_nextIx, send_rec);
     
-  } else if ( (inp | 1<<5) == 'h') {
-    Serial << F("# R - > Record on/off!\nC -> Clear store(!)\ns -> log Status\n<p> -> Play recording\n");
+  } else if ( (inp | 1<<5) == 'h' || inp == '?') {
+    Serial << F("# R - > Record on/off!\n# C -> Clear store(!)\n# s -> log Status\n# <p> -> Play recording\n");
     EDISK_clear();
     lcd.clear();
     lcd << F("R:rec1/0 C:clear");
@@ -271,7 +271,7 @@ void setup(){
     send_config();
     send_state(now);
   #endif
-  Serial << F("CLICKS, MaxCPM" STR(NCLICK_TIMES)) << endl;
+  Serial << F("# CLICKS,MaxCPM" STR(NCLICK_TIMES)) << endl;
   update_stats(0, now);
 
   lastStatsMs = lastEdiskMs = millis();
